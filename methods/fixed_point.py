@@ -6,16 +6,14 @@ import sympy as sp
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _parse(func_str: str):
-    """Devuelve (callable, latex_str) o lanza excepción."""
+def _local_dict():
     x = sp.Symbol("x")
-    # Mapeo explícito: sympify trata 'e' como símbolo libre sin esto
-    local_dict = {
+    return x, {
         "x":    x,
-        "e":    sp.E,       # e**x  →  número de Euler
+        "e":    sp.E,
         "E":    sp.E,
         "pi":   sp.pi,
-        "ln":   sp.log,     # ln(x) →  logaritmo natural
+        "ln":   sp.log,
         "log":  sp.log,
         "exp":  sp.exp,
         "sin":  sp.sin,
@@ -25,28 +23,37 @@ def _parse(func_str: str):
         "Abs":  sp.Abs,
         "abs":  sp.Abs,
     }
-    expr = sp.sympify(func_str.replace("^", "**"), locals=local_dict)
-    # numpy resuelve exp/sin/cos/log sin conflictos de tipos
+
+
+def _parse_f(func_str: str):
+    """Devuelve (callable, latex_str) o lanza excepción."""
+    x, ld = _local_dict()
+    expr = sp.sympify(func_str.replace("^", "**"), locals=ld)
     f = sp.lambdify(x, expr, modules=["numpy"])
     return f, sp.latex(expr)
 
 
-def _bisect(f, a: float, b: float, tol: float, max_iter: int):
+def _parse_g(func_str: str):
+    """Parsea g(x) y su derivada.
+    Devuelve (callable_g, callable_gp, latex_g, latex_gp) o lanza excepción."""
+    x, ld = _local_dict()
+    expr     = sp.sympify(func_str.replace("^", "**"), locals=ld)
+    expr_der = sp.diff(expr, x)
+    g  = sp.lambdify(x, expr,     modules=["numpy"])
+    gp = sp.lambdify(x, expr_der, modules=["numpy"])
+    return g, gp, sp.latex(expr), sp.latex(expr_der)
+
+
+def _fixed_point(g, x0: float, tol: float, max_iter: int):
     rows = []
-    fa = float(f(a))
+    xn = x0
     for i in range(max_iter):
-        c = (a + b) / 2.0
-        fc = float(f(c))
-        rows.append({"i": i, "a": a, "b": b, "c": c, "fc": fc})
-        if abs(fc) <= tol or (b - a) / 2.0 <= tol:
-            return c, rows, True
-        if fa * fc < 0:
-            b = c
-        else:
-            a = c
-            fa = fc
-    c = (a + b) / 2.0
-    return c, rows, False
+        xn1 = float(g(xn))
+        rows.append({"n": i, "xn": xn, "xn1": xn1})
+        if abs(xn1 - xn) <= tol:
+            return xn1, rows, True
+        xn = xn1
+    return xn, rows, False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -56,10 +63,8 @@ def _bisect(f, a: float, b: float, tol: float, max_iter: int):
 def run():
     st.markdown("""
     <style>
-    /* ── Tamaño base de letra (Streamlit default: 16px) ── */
     html { font-size: 20px; }
 
-    /* ── Botón rojo a ancho completo ── */
     div.stButton { width: 100%; }
     div.stButton > button {
         background-color: #dc2626;
@@ -76,11 +81,9 @@ def run():
     div.stButton > button:hover  { background-color: #b91c1c; color: #fff; }
     div.stButton > button:active { background-color: #991b1b; color: #fff; }
 
-    /* ── Tabla centrada ── */
     table { margin: 0.5rem auto 0 auto; }
     table th, table td { text-align: center !important; }
 
-    /* ── Tarjetas de resultado ── */
     .result-cards { display: flex; gap: 1.2rem; margin: 0.6rem 0 1.6rem 0; }
     .result-card {
         flex: 1;
@@ -112,7 +115,7 @@ def run():
     </style>
     """, unsafe_allow_html=True)
 
-    st.title("Método de Bisección")
+    st.title("Método de Punto Fijo")
 
     # ── f(x) ─────────────────────────────────────────────────────────────────
     func_str = st.text_input(
@@ -121,54 +124,60 @@ def run():
         placeholder="Ej: x**2 - 4,  sin(x) - x/2,  exp(x) - 3",
     )
 
-    f = latex_f = None
+    f = None
     if func_str:
         try:
-            f, latex_f = _parse(func_str)
+            f, latex_f = _parse_f(func_str)
             st.latex(rf"f(x) = {latex_f}")
         except Exception as e:
             st.error(f"No se pudo interpretar la función: {e}")
 
-    # ── Intervalo [a, b] ──────────────────────────────────────────────────────
-    col_a, col_b = st.columns(2)
-    a_str = col_a.text_input("a", value="1")
-    b_str = col_b.text_input("b", value="2")
-    try:
-        a = float(a_str)
-    except ValueError:
-        a = None
-        col_a.error("Valor inválido")
-    try:
-        b = float(b_str)
-    except ValueError:
-        b = None
-        col_b.error("Valor inválido")
-    if a is not None and b is not None:
-        st.latex(rf"[a,\; b] = [{a},\; {b}]")
+    # ── g(x) ─────────────────────────────────────────────────────────────────
+    g_str = st.text_input(
+        "g(x) — función de iteración  [despejada como x = g(x)]",
+        value="(x + 2)**(1/3)",
+        placeholder="Ej: (x + 2)**(1/3),  cos(x),  (x**2 + 4) / 3",
+    )
 
-    # ── Bolzano ───────────────────────────────────────────────────────────────
-    bolzano_ok = False
-    if f and a is not None and b is not None:
+    g = gp = None
+    if g_str:
         try:
-            fa_val = float(f(a))
-            fb_val = float(f(b))
-            prod = fa_val * fb_val
-            bolzano_ok = prod < 0
-            sign = r"<" if bolzano_ok else r"\geq"
-            latex_bolzano = (
-                rf"$f(a) \cdot f(b) = {fa_val:.6g} \cdot {fb_val:.6g}"
-                rf" = {prod:.6g} \; {sign} \; 0$"
-            )
-            if bolzano_ok:
-                st.success(f"**Bolzano se cumple:** {latex_bolzano}")
-            else:
-                st.error(f"**Bolzano no se cumple:** {latex_bolzano}")
+            g, gp, latex_g, latex_gp = _parse_g(g_str)
+            st.latex(rf"g(x) = {latex_g}")
+            st.latex(rf"g'(x) = {latex_gp}")
         except Exception as e:
-            st.error(f"Error al evaluar en el intervalo: {e}")
+            st.error(f"No se pudo interpretar g(x): {e}")
+
+    # ── x₀ ───────────────────────────────────────────────────────────────────
+    x0_str = st.text_input("x₀  (valor inicial)", value="1.5")
+    x0 = None
+    try:
+        x0 = float(x0_str)
+    except ValueError:
+        st.error("Valor inválido para x₀")
+
+    # ── Criterio de Lipschitz  |g'(x₀)| < 1 ─────────────────────────────────
+    lipschitz_ok = False
+    if gp is not None and x0 is not None:
+        try:
+            gp_val = float(gp(x0))
+            abs_gp = abs(gp_val)
+            sign   = r"<" if abs_gp < 1 else r"\geq"
+            lip_expr = (
+                rf"$|g'(x_0)| = |g'({x0})| = |{gp_val:.6g}|"
+                rf" = {abs_gp:.6g} \; {sign} \; 1$"
+            )
+            lipschitz_ok = abs_gp < 1
+            if lipschitz_ok:
+                st.success(f"**Criterio de Lipschitz se cumple:** {lip_expr}")
+            else:
+                st.error(f"**Criterio de Lipschitz no se cumple:** {lip_expr}")
+        except Exception as e:
+            st.error(f"Error al evaluar g'(x₀): {e}")
 
     # ── Parámetros ────────────────────────────────────────────────────────────
     c1, c2, c3 = st.columns(3)
-    tol_str  = c1.text_input("Tolerancia (ε)", value="0.000001")
+    tol_str = c1.text_input("Tolerancia (ε)", value="0.000001")
     try:
         tol = float(tol_str)
     except ValueError:
@@ -189,28 +198,30 @@ def run():
 
     # ── Botón ─────────────────────────────────────────────────────────────────
     if st.button("Calcular raíz", use_container_width=True):
-        if not f:
-            st.error("Ingresá una función válida antes de calcular.")
-        elif a is None or b is None:
-            st.error("Ingresá valores válidos para a y b.")
+        if not g:
+            st.error("Ingresá una función g(x) válida antes de calcular.")
+        elif x0 is None:
+            st.error("Ingresá un valor válido para x₀.")
         elif tol is None:
             st.error("Ingresá una tolerancia válida.")
         elif max_iter is None or decimals is None:
             st.error("Ingresá valores válidos para iteraciones y decimales.")
-        elif a >= b:
-            st.error("Se requiere $a < b$.")
-        elif not bolzano_ok:
-            st.warning("Bolzano no se cumple: el intervalo no garantiza una raíz.")
+        elif not lipschitz_ok:
+            st.warning(
+                "El criterio de Lipschitz no se cumple: "
+                "la convergencia no está garantizada en x₀."
+            )
         else:
-            root, rows, converged = _bisect(f, a, b, tol, max_iter)
+            root, rows, converged = _fixed_point(g, x0, tol, max_iter)
             n = len(rows)
 
-            # Resultado
             if converged:
                 st.success(f"**Convergencia alcanzada en {n} iteraciones**")
             else:
-                st.warning(f"**Sin convergencia** tras {n} iteraciones"
-                           "Mostrando mejor aproximación.")
+                st.warning(
+                    f"**Sin convergencia** tras {n} iteraciones. "
+                    "Mostrando mejor aproximación."
+                )
 
             st.markdown(f"""
             <div class="result-cards">
@@ -227,18 +238,15 @@ def run():
             </div>
             """, unsafe_allow_html=True)
 
-            # Tabla con encabezados LaTeX (markdown nativo de Streamlit)
             d = decimals
             lines = [
-                r"| $i$ | $a$ | $b$ | $c = \dfrac{a+b}{2}$ | $f(c)$ |",
-                "|:---:|:---:|:---:|:---:|:---:|",
+                r"| $n$ | $x_n$ | $x_{n+1} = g(x_n)$ |",
+                "|:---:|:---:|:---:|",
             ]
             for row in rows:
                 lines.append(
-                    f"| {row['i']} "
-                    f"| {row['a']:.{d}f} "
-                    f"| {row['b']:.{d}f} "
-                    f"| {row['c']:.{d}f} "
-                    f"| {row['fc']:.{d}f} |"
+                    f"| {row['n']} "
+                    f"| {row['xn']:.{d}f} "
+                    f"| {row['xn1']:.{d}f} |"
                 )
             st.markdown("\n".join(lines))
