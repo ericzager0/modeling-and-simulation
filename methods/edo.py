@@ -11,10 +11,10 @@ import pandas as pd
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _local_dict():
-    t = sp.Symbol("t")
+    x = sp.Symbol("x")
     y = sp.Symbol("y")
-    return t, y, {
-        "t":    t,    "y":    y,
+    return x, y, {
+        "x":    x,    "y":    y,
         "e":    sp.E, "E":    sp.E,
         "pi":   sp.pi,
         "ln":   sp.log,  "log":  sp.log,
@@ -26,10 +26,10 @@ def _local_dict():
 
 
 def _parse_ode(func_str: str):
-    """Parsea la RHS de y' = f(t, y). Devuelve (callable, expr, latex)."""
-    t, y, ld = _local_dict()
+    """Parsea la RHS de y' = f(x, y). Devuelve (callable, expr, latex)."""
+    x, y, ld = _local_dict()
     expr = sp.sympify(func_str.replace("^", "**"), locals=ld)
-    f    = sp.lambdify((t, y), expr, modules=["numpy"])
+    f    = sp.lambdify((x, y), expr, modules=["numpy"])
     return f, expr, sp.latex(expr)
 
 
@@ -51,23 +51,23 @@ def _fmt(v, prec: int = 8) -> str:
 
 def _solve_exact(expr, t0: float, y0: float):
     """
-    Intenta resolver y' = expr con y(t0) = y0 de forma simbólica.
+    Intenta resolver y' = expr con y(x0) = y0 de forma simbólica.
     Devuelve (callable, rhs_expr) o (None, None).
     """
-    t, y, _ = _local_dict()
+    x, y, _ = _local_dict()
     yf = sp.Function("y")
     try:
-        t0_s = sp.nsimplify(t0, rational=True)
+        x0_s = sp.nsimplify(t0, rational=True)
         y0_s = sp.nsimplify(y0, rational=True)
-        ode_eq = sp.Eq(yf(t).diff(t), expr.subs(y, yf(t)))
-        sol    = sp.dsolve(ode_eq, yf(t), ics={yf(t0_s): y0_s})
+        ode_eq = sp.Eq(yf(x).diff(x), expr.subs(y, yf(x)))
+        sol    = sp.dsolve(ode_eq, yf(x), ics={yf(x0_s): y0_s})
         if isinstance(sol, list):
             sol = sol[0]
         rhs  = sol.rhs
-        func = sp.lambdify(t, rhs, modules=["numpy"])
-        # sanity check: evaluable y finita en t0
+        func = sp.lambdify(x, rhs, modules=["numpy"])
+        # sanity check: evaluable y finita en x0
         if not math.isfinite(float(func(float(t0)))):
-            raise ValueError("Valor no finito en t0.")
+            raise ValueError("Valor no finito en x0.")
         return func, rhs
     except Exception:
         return None, None
@@ -82,9 +82,9 @@ def _euler(f, t0, y0, t_end, h):
     rows, t_n, y_n = [], t0, y0
     for k in range(N):
         y_next = y_n + h * f(t_n, y_n)
-        rows.append({"n": k, "t": t_n, "y": y_n, "y_next": y_next})
+        rows.append({"n": k, "x": t_n, "y": y_n, "y_next": y_next})
         t_n, y_n = t0 + (k + 1) * h, y_next
-    rows.append({"n": N, "t": t_n, "y": y_n, "y_next": None})
+    rows.append({"n": N, "x": t_n, "y": y_n, "y_next": None})
     return rows
 
 
@@ -95,9 +95,9 @@ def _heun(f, t0, y0, t_end, h):
         k1     = f(t_n, y_n)
         k2     = f(t_n + h, y_n + h * k1)
         y_next = y_n + (h / 2) * (k1 + k2)
-        rows.append({"n": k, "t": t_n, "y": y_n, "y_next": y_next})
+        rows.append({"n": k, "x": t_n, "y": y_n, "y_next": y_next})
         t_n, y_n = t0 + (k + 1) * h, y_next
-    rows.append({"n": N, "t": t_n, "y": y_n, "y_next": None})
+    rows.append({"n": N, "x": t_n, "y": y_n, "y_next": None})
     return rows
 
 
@@ -111,13 +111,13 @@ def _rk4(f, t0, y0, t_end, h):
         k4     = f(t_n + h,   y_n +  h     * k3)
         y_next = y_n + (h / 6) * (k1 + 2*k2 + 2*k3 + k4)
         rows.append({
-            "n": k, "t": t_n, "y": y_n,
+            "n": k, "x": t_n, "y": y_n,
             "k1": k1, "k2": k2, "k3": k3, "k4": k4,
             "y_next": y_next,
         })
         t_n, y_n = t0 + (k + 1) * h, y_next
     rows.append({
-        "n": N, "t": t_n, "y": y_n,
+        "n": N, "x": t_n, "y": y_n,
         "k1": None, "k2": None, "k3": None, "k4": None,
         "y_next": None,
     })
@@ -130,7 +130,7 @@ def _enrich(rows: list, y_exact_func) -> list:
         return rows
     for r in rows:
         try:
-            yr = float(y_exact_func(r["t"]))
+            yr = float(y_exact_func(r["x"]))
             r["y_real"] = yr
             r["error"]  = abs(yr - r["y"])
         except Exception:
@@ -158,7 +158,7 @@ def _col_cfg(df: pd.DataFrame) -> dict:
 def _df_euler_heun(rows: list, has_exact: bool) -> pd.DataFrame:
     d = {
         "n":     [r["n"]           for r in rows],
-        "tₙ":    [r["t"]           for r in rows],
+        "xₙ":    [r["x"]           for r in rows],
         "yₙ":    [r["y"]           for r in rows],
         "yₙ₊₁": [r.get("y_next")  for r in rows],
     }
@@ -171,7 +171,7 @@ def _df_euler_heun(rows: list, has_exact: bool) -> pd.DataFrame:
 def _df_rk4(rows: list, has_exact: bool) -> pd.DataFrame:
     d = {
         "n":     [r["n"]           for r in rows],
-        "tₙ":    [r["t"]           for r in rows],
+        "xₙ":    [r["x"]           for r in rows],
         "yₙ":    [r["y"]           for r in rows],
         "k₁":    [r.get("k1")      for r in rows],
         "k₂":    [r.get("k2")      for r in rows],
@@ -188,7 +188,7 @@ def _df_rk4(rows: list, has_exact: bool) -> pd.DataFrame:
 def _df_comparison(e_rows, h_rows, r_rows, has_exact) -> pd.DataFrame:
     d = {
         "n":       [r["n"]  for r in e_rows],
-        "tₙ":      [r["t"]  for r in e_rows],
+        "xₙ":      [r["x"]  for r in e_rows],
     }
     if has_exact:
         d["y_real"] = [r.get("y_real") for r in e_rows]
@@ -258,25 +258,25 @@ def run():
 
     # ── EDO ───────────────────────────────────────────────────────────────────
     func_str = st.text_input(
-        "y' = f(t, y)  —  lado derecho de la ecuación diferencial",
+        "y' = f(x, y)  —  lado derecho de la ecuación diferencial",
         value="",
-        placeholder="Ej: y - t**2 + 1   |   -2*t*y   |   sin(t) + y",
+        placeholder="Ej: y - x**2 + 1   |   -2*x*y   |   sin(x) + y",
     )
     f_func = f_expr = latex_f = None
     if func_str.strip():
         try:
             f_func, f_expr, latex_f = _parse_ode(func_str)
-            st.latex(rf"\dfrac{{dy}}{{dt}} \;=\; {latex_f}")
+            st.latex(rf"\dfrac{{dy}}{{dx}} \;=\; {latex_f}")
         except Exception as e:
             st.error(f"No se pudo interpretar la función: {e}")
 
     # ── Condición inicial ─────────────────────────────────────────────────────
     c1, c2 = st.columns(2)
     with c1:
-        t0_str = st.text_input("t₀  —  tiempo inicial", value="0",
+        t0_str = st.text_input("x₀  —  punto inicial", value="0",
                                placeholder="Ej: 0")
     with c2:
-        y0_str = st.text_input("y₀  —  valor inicial  y(t₀)", value="",
+        y0_str = st.text_input("y₀  —  valor inicial  y(x₀)", value="",
                                placeholder="Ej: 0.5")
 
     t0 = y0 = None
@@ -290,7 +290,7 @@ def run():
 
     # ── t_end ─────────────────────────────────────────────────────────────────
     tend_str = st.text_input(
-        "t_end  —  extremo derecho del intervalo",
+        "x_end  —  extremo derecho del intervalo",
         value="", placeholder="Ej: 2"
     )
     t_end = None
@@ -299,7 +299,7 @@ def run():
             t_end = _parse_val(tend_str)
             if t0 is not None:
                 st.latex(
-                    rf"t \;\in\; \left[\,{_fmt(t0)},\;{_fmt(t_end)}\,\right]"
+                    rf"x \;\in\; \left[\,{_fmt(t0)},\;{_fmt(t_end)}\,\right]"
                 )
         except Exception:
             st.error("Valor inválido para t_end.")
@@ -325,14 +325,14 @@ def run():
     if calc:
         missing = []
         if f_func is None:  missing.append("la EDO")
-        if t0 is None:      missing.append("t₀ e y₀")
-        if t_end is None:   missing.append("t_end")
+        if t0 is None:      missing.append("x₀ e y₀")
+        if t_end is None:   missing.append("x_end")
         if h_val is None:   missing.append("h")
         if missing:
             st.error(f"Faltá ingresar: {', '.join(missing)}.")
             st.stop()
         if t_end <= t0:
-            st.error("t_end debe ser mayor que t₀.")
+            st.error("x_end debe ser mayor que x₀.")
             st.stop()
         if h_val >= t_end - t0:
             st.error("El paso h es demasiado grande para el intervalo dado.")
@@ -393,7 +393,7 @@ def run():
     st.markdown("---")
     if has_exact:
         st.success(
-            rf"Solución exacta encontrada: $\quad y(t) = {sp.latex(res['y_ex_expr'])}$"
+            rf"Solución exacta encontrada: $\quad y(x) = {sp.latex(res['y_ex_expr'])}$"
         )
     else:
         st.info(
@@ -408,25 +408,25 @@ def run():
 
     cards = f"""<div class="result-cards">
         <div class="result-card" style="border-top:3px solid #dc2626;">
-            <div class="rc-label">Euler — y(t_end)</div>
+            <div class="rc-label">Euler — y(x_end)</div>
             <div class="rc-value">{_fmt(fe, 6)}</div>
-            <div class="rc-sub">t = {_fmt(t_end_r)}</div>
+            <div class="rc-sub">x = {_fmt(t_end_r)}</div>
         </div>
         <div class="result-card" style="border-top:3px solid #f59e0b;">
-            <div class="rc-label">Heun — y(t_end)</div>
+            <div class="rc-label">Heun — y(x_end)</div>
             <div class="rc-value">{_fmt(fh, 6)}</div>
-            <div class="rc-sub">t = {_fmt(t_end_r)}</div>
+            <div class="rc-sub">x = {_fmt(t_end_r)}</div>
         </div>
         <div class="result-card" style="border-top:3px solid #16a34a;">
-            <div class="rc-label">RK4 — y(t_end)</div>
+            <div class="rc-label">RK4 — y(x_end)</div>
             <div class="rc-value">{_fmt(fr, 6)}</div>
-            <div class="rc-sub">t = {_fmt(t_end_r)}</div>
+            <div class="rc-sub">x = {_fmt(t_end_r)}</div>
         </div>"""
     if has_exact:
         fx = float(res["y_ex_func"](t_end_r))
         cards += f"""
         <div class="result-card" style="border-top:3px solid #2563eb;">
-            <div class="rc-label">Exacto — y(t_end)</div>
+            <div class="rc-label">Exacto — y(x_end)</div>
             <div class="rc-value">{_fmt(fx, 6)}</div>
             <div class="rc-sub">y_real</div>
         </div>"""
@@ -440,7 +440,7 @@ def run():
 
     with tab_e:
         st.markdown("#### Método de Euler")
-        st.latex(r"y_{n+1} = y_n + h \cdot f(t_n,\; y_n)")
+        st.latex(r"y_{n+1} = y_n + h \cdot f(x_n,\; y_n)")
         df_e = _df_euler_heun(e_rows, has_exact)
         st.dataframe(df_e, column_config=_col_cfg(df_e),
                      hide_index=True, use_container_width=True)
@@ -449,8 +449,8 @@ def run():
         st.markdown("#### Método de Heun  (Euler mejorado)")
         col1, col2 = st.columns(2)
         with col1:
-            st.latex(r"k_1 = f(t_n,\; y_n)")
-            st.latex(r"k_2 = f(t_n + h,\; y_n + h\,k_1)")
+            st.latex(r"k_1 = f(x_n,\; y_n)")
+            st.latex(r"k_2 = f(x_n + h,\; y_n + h\,k_1)")
         with col2:
             st.latex(r"y_{n+1} = y_n + \dfrac{h}{2}\,(k_1 + k_2)")
         df_h = _df_euler_heun(h_rows, has_exact)
@@ -461,14 +461,14 @@ def run():
         st.markdown("#### Runge–Kutta de orden 4")
         col1, col2 = st.columns(2)
         with col1:
-            st.latex(r"k_1 = f(t_n,\; y_n)")
+            st.latex(r"k_1 = f(x_n,\; y_n)")
             st.latex(
-                r"k_2 = f\!\left(t_n+\tfrac{h}{2},\; y_n+\tfrac{h}{2}k_1\right)"
+                r"k_2 = f\!\left(x_n+\tfrac{h}{2},\; y_n+\tfrac{h}{2}k_1\right)"
             )
             st.latex(
-                r"k_3 = f\!\left(t_n+\tfrac{h}{2},\; y_n+\tfrac{h}{2}k_2\right)"
+                r"k_3 = f\!\left(x_n+\tfrac{h}{2},\; y_n+\tfrac{h}{2}k_2\right)"
             )
-            st.latex(r"k_4 = f(t_n+h,\; y_n+h\,k_3)")
+            st.latex(r"k_4 = f(x_n+h,\; y_n+h\,k_3)")
         with col2:
             st.latex(
                 r"y_{n+1} = y_n + \dfrac{h}{6}\,(k_1 + 2k_2 + 2k_3 + k_4)"
@@ -497,7 +497,7 @@ def run():
     show_hu = ck3.checkbox("Heun",   value=True, key="chk_heun")
     show_rk = ck4.checkbox("RK4",    value=True, key="chk_rk4")
 
-    t_pts = [r["t"] for r in e_rows]
+    t_pts = [r["x"] for r in e_rows]
     fig   = go.Figure()
 
     if show_ex and has_exact:
@@ -540,8 +540,8 @@ def run():
         ))
 
     fig.update_layout(
-        xaxis_title="t",
-        yaxis_title="y(t)",
+        xaxis_title="x",
+        yaxis_title="y(x)",
         legend=dict(orientation="h", yanchor="bottom", y=1.02,
                     xanchor="right", x=1),
         margin=dict(l=50, r=20, t=50, b=50),

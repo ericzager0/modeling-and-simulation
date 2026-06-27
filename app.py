@@ -13,13 +13,14 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-PAGINAS = ["Inicio", "Bisección", "Punto Fijo", "Aitken", "Newton-Raphson", "Lagrange", "Newton-Cotes", "Montecarlo", "EDOs"]
+PAGINAS = ["Teoría", "Bisección", "Punto Fijo", "Aitken", "Newton-Raphson", "Lagrange", "Newton-Cotes", "Montecarlo", "EDOs"]
 
 with st.sidebar:
     pagina = st.radio("Navegación", PAGINAS, label_visibility="collapsed")
 
-if pagina == "Inicio":
-    st.title("Simulador de Métodos Numéricos")
+if pagina == "Teoría":
+    from methods.theory import run
+    run()
 
 elif pagina == "Bisección":
     from methods.bisection import run
