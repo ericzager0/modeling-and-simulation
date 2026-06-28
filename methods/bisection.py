@@ -34,6 +34,7 @@ def _parse(func_str: str):
 def _bisect(f, a: float, b: float, tol: float, max_iter: int):
     rows = []
     fa = float(f(a))
+    c = (a + b) / 2.0  # valor por defecto si max_iter llega a ser 0
     for i in range(max_iter):
         c = (a + b) / 2.0
         fc = float(f(c))
@@ -45,7 +46,8 @@ def _bisect(f, a: float, b: float, tol: float, max_iter: int):
         else:
             a = c
             fa = fc
-    c = (a + b) / 2.0
+    # Importante: "c" ya quedó seteado en la última fila de la tabla (rows[-1]),
+    # así el resultado final siempre coincide con lo que se muestra en pantalla.
     return c, rows, False
 
 
@@ -111,6 +113,64 @@ def run():
     }
     </style>
     """, unsafe_allow_html=True)
+
+    # ── Teoría (desplegable, arriba de todo) ───────────────────────────────────
+    with st.expander("📘 Teoría: ¿Cómo funciona el Método de Bisección?", expanded=False):
+        st.markdown(r"""
+### ¿Qué es?
+
+El **método de bisección** es un método numérico para encontrar raíces (ceros) de una
+función continua $f(x)$, es decir, valores $x^{*}$ tales que $f(x^{*}) = 0$.
+
+Se basa en el **Teorema de Bolzano** (teorema del valor intermedio):
+
+> Si $f$ es continua en $[a, b]$ y $f(a) \cdot f(b) < 0$ (signos opuestos en los extremos),
+> entonces existe **al menos una raíz** $x^{*} \in (a, b)$.
+
+Por eso, antes de empezar a iterar, siempre se verifica esta condición sobre el intervalo elegido.
+""")
+
+        st.markdown("### Paso a paso del algoritmo")
+        st.markdown(r"""
+1. **Elegir un intervalo $[a, b]$** en el que se cumpla Bolzano: $f(a) \cdot f(b) < 0$.
+2. **Calcular el punto medio** del intervalo:
+""")
+        st.latex(r"c = \frac{a+b}{2}")
+        st.markdown(r"""
+3. **Evaluar $f(c)$.**
+4. **Verificar el criterio de parada.** Se detiene si:
+   - $|f(c)| \le \varepsilon$ (la función ya vale ≈ 0 en $c$), **o**
+   - $\dfrac{b-a}{2} \le \varepsilon$ (el intervalo ya es lo bastante chico)
+
+   En ese caso, $c$ es la raíz aproximada buscada.
+5. **Si todavía no converge, decidir en qué mitad del intervalo sigue estando la raíz**,
+   comparando el signo de $f(a)$ con el de $f(c)$:
+   - Si $f(a) \cdot f(c) < 0$ → la raíz está en $[a, c]$ → se actualiza $b = c$ (queda $a$ igual).
+   - Si $f(a) \cdot f(c) > 0$ → la raíz está en $[c, b]$ → se actualiza $a = c$ (queda $b$ igual).
+6. **Repetir** desde el paso 2 con el nuevo intervalo $[a,b]$ ya reducido, hasta cumplir
+   el criterio de parada o alcanzar el número máximo de iteraciones permitido.
+""")
+
+        st.markdown("### ¿Por qué funciona?")
+        st.markdown(r"""
+En cada iteración el intervalo que contiene a la raíz se reduce exactamente a la mitad.
+Esto significa que, si Bolzano se cumple al principio, el método **siempre converge**
+(no hace falta que $f$ sea derivable, solo continua). Es decir, es muy robusto, aunque
+no el más rápido.
+
+La cota de error después de $n$ iteraciones es:
+""")
+        st.latex(r"|x^{*} - c_n| \;\le\; \frac{b-a}{2^{\,n+1}}")
+
+        st.markdown(r"""
+### Ventajas y desventajas
+
+| Ventajas | Desventajas |
+|---|---|
+| Convergencia **garantizada** si se cumple Bolzano | Convergencia **lineal**: relativamente lenta frente a Newton-Raphson o secante |
+| No necesita calcular derivadas | Requiere un intervalo inicial válido (con cambio de signo) |
+| Muy simple, estable y fácil de implementar | No detecta raíces de multiplicidad par, donde $f$ no cambia de signo |
+""")
 
     st.title("Método de Bisección")
 
@@ -197,6 +257,10 @@ def run():
             st.error("Ingresá una tolerancia válida.")
         elif max_iter is None or decimals is None:
             st.error("Ingresá valores válidos para iteraciones y decimales.")
+        elif max_iter < 1:
+            st.error("El número de iteraciones debe ser al menos 1.")
+        elif decimals < 0:
+            st.error("Los decimales deben ser un número entero ≥ 0.")
         elif a >= b:
             st.error("Se requiere $a < b$.")
         elif not bolzano_ok:
@@ -209,7 +273,7 @@ def run():
             if converged:
                 st.success(f"**Convergencia alcanzada en {n} iteraciones**")
             else:
-                st.warning(f"**Sin convergencia** tras {n} iteraciones"
+                st.warning(f"**Sin convergencia** tras {n} iteraciones. "
                            "Mostrando mejor aproximación.")
 
             st.markdown(f"""

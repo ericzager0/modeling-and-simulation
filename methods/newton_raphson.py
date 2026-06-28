@@ -121,6 +121,77 @@ def run():
     </style>
     """, unsafe_allow_html=True)
 
+    # ── Teoría (desplegable, arriba de todo) ───────────────────────────────────
+    with st.expander("📘 Teoría: ¿Cómo funciona el Método de Newton-Raphson?", expanded=False):
+        st.markdown(r"""
+### ¿Qué es?
+
+El **método de Newton-Raphson** busca raíces de $f(x) = 0$ usando la **recta tangente**
+a la curva en cada punto. Es, en general, el método más rápido de todos los que vimos
+hasta ahora (bisección, punto fijo, Aitken) — pero a cambio necesita poder calcular $f'(x)$.
+
+### La idea geométrica
+
+Parados en un punto $x_n$:
+
+1. Trazamos la **recta tangente** a $f$ en $(x_n,\, f(x_n))$. Su pendiente es $f'(x_n)$.
+2. Esa recta corta al eje $x$ en algún punto — lo llamamos $x_{n+1}$.
+3. Como la tangente "sigue" a la curva, $x_{n+1}$ suele estar más cerca de la raíz real que $x_n$.
+4. Repetimos el proceso desde $x_{n+1}$.
+
+*(En el gráfico que se genera después de calcular, podés ver justamente esto: el punto de
+arranque $x_0$ sobre la curva, y la raíz final marcada sobre el eje $x$.)*
+
+### De la geometría a la fórmula
+
+La recta tangente en $x_n$ es:
+""")
+        st.latex(r"y - f(x_n) = f'(x_n)\,(x - x_n)")
+        st.markdown(r"Buscamos dónde esa recta cruza el eje $x$ (es decir, $y=0$):")
+        st.latex(r"0 - f(x_n) = f'(x_n)\,(x_{n+1} - x_n) \;\;\Longrightarrow\;\; x_{n+1} = x_n - \frac{f(x_n)}{f'(x_n)}")
+
+        st.markdown("### Paso a paso del algoritmo")
+        st.markdown(r"""
+1. **Definir $f(x)$** (esta calculadora deriva $f'(x)$ automáticamente).
+2. **Elegir un valor inicial $x_0$**, idealmente cerca de la raíz buscada y con $f'(x_0) \neq 0$.
+3. **Calcular el siguiente punto:**
+""")
+        st.latex(r"x_{n+1} = x_n - \frac{f(x_n)}{f'(x_n)}")
+        st.markdown(r"""
+4. **Verificar el criterio de parada:** si $|x_{n+1} - x_n| \le \varepsilon$, $x_{n+1}$ es la raíz aproximada.
+5. **Si no, repetir** desde el paso 3 usando $x_{n+1}$ como nuevo $x_n$, hasta convergencia o
+   máximo de iteraciones.
+6. **Si en algún paso $f'(x_n) \approx 0$**, la tangente queda horizontal y no corta al eje $x$
+   en ningún punto razonable — el método se detiene ahí (esta calculadora lo detecta y lo avisa).
+
+### Velocidad de convergencia
+
+Cerca de una raíz **simple** (donde $f'(x^{*}) \neq 0$), Newton-Raphson converge
+**cuadráticamente**: la cantidad de cifras correctas aproximadamente se **duplica** en cada
+iteración. Por eso, para $f(x) = x^3 - x - 2$ con $x_0 = 1.5$, alcanza una tolerancia de
+$10^{-12}$ en solo **4 iteraciones** — mucho menos que bisección, punto fijo o incluso Aitken.
+
+Si la raíz es **múltiple** (es decir, $f'(x^{*}) = 0$ también), la convergencia se degrada y
+vuelve a ser solo lineal, como en los métodos anteriores.
+
+### Cuándo puede fallar
+
+- **$f'(x_n) \approx 0$ en algún paso:** la tangente queda (casi) horizontal — no hay buen
+  siguiente punto. El método se detiene.
+- **$x_0$ mal elegido:** lejos de la raíz, Newton puede divergir, oscilar entre dos valores,
+  o "saltar" hacia una raíz distinta de la que se buscaba.
+- **Funciones con curvatura fuerte o varias raíces cercanas:** el resultado puede ser sensible
+  al punto de partida.
+
+### Ventajas y desventajas
+
+| Ventajas | Desventajas |
+|---|---|
+| Convergencia muy rápida (cuadrática) cerca de una raíz simple | Necesita poder calcular $f'(x)$ |
+| No necesita un intervalo con cambio de signo, como bisección | Puede diverger si $x_0$ está lejos de la raíz o si $f'(x)$ es chica |
+| Suele necesitar muy pocas iteraciones en la práctica | Pierde velocidad en raíces múltiples ($f'(x^{*})=0$) |
+""")
+
     st.title("Método de Newton-Raphson")
 
     # ── f(x)  y  f'(x) calculada automáticamente ─────────────────────────────
@@ -199,6 +270,10 @@ def run():
             st.error("Ingresá una tolerancia válida.")
         elif max_iter is None or decimals is None:
             st.error("Ingresá valores válidos para iteraciones y decimales.")
+        elif max_iter < 1:
+            st.error("El número de iteraciones debe ser al menos 1.")
+        elif decimals < 0:
+            st.error("Los decimales deben ser un número entero ≥ 0.")
         elif not deriv_ok:
             st.warning(
                 "f'(x₀) = 0: elegí un x₀ distinto donde la derivada no se anule."

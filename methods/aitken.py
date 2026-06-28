@@ -133,6 +133,75 @@ def run():
     </style>
     """, unsafe_allow_html=True)
 
+    # ── Teoría (desplegable, arriba de todo) ───────────────────────────────────
+    with st.expander("📘 Teoría: ¿Cómo funciona el Método de Aitken?", expanded=False):
+        st.markdown(r"""
+### ¿Qué es?
+
+El **método de Aitken** (proceso $\Delta^2$ de Aitken) no es un método de punto fijo nuevo,
+sino una técnica para **acelerar** una sucesión que ya converge — en este caso, la sucesión
+generada por la iteración de punto fijo $x_{n+1} = g(x_n)$.
+
+La iteración de punto fijo simple converge, en general, **linealmente**: el error de un paso
+es aproximadamente proporcional al error del paso anterior. Aitken aprovecha justamente ese
+patrón: si conocemos tres términos consecutivos de la sucesión ($x_n$, $x_{n+1}$, $x_{n+2}$)
+y el error decae de forma aproximadamente geométrica, podemos "extrapolar" matemáticamente
+hacia dónde está convergiendo la sucesión, sin esperar a que llegue ahí por sí sola.
+""")
+
+        st.markdown("### La fórmula")
+        st.markdown(r"A partir de $x_n$, se generan dos pasos de la iteración simple:")
+        st.latex(r"x_{n+1} = g(x_n) \qquad x_{n+2} = g(x_{n+1})")
+        st.markdown("Y se calculan las diferencias:")
+        st.latex(r"\Delta x_n = x_{n+1} - x_n \qquad \Delta^2 x_n = x_{n+2} - 2x_{n+1} + x_n")
+        st.markdown("La estimación acelerada de la raíz es:")
+        st.latex(r"\hat{x}_n = x_n - \frac{(\Delta x_n)^2}{\Delta^2 x_n}")
+
+        st.markdown("### Paso a paso del algoritmo")
+        st.markdown(r"""
+1. **Despejar $g(x)$** de $f(x) = 0$ (igual que en punto fijo) y elegir un valor inicial $x_0$.
+2. **Generar dos pasos** de la iteración simple a partir de $x_n$: $x_{n+1} = g(x_n)$ y $x_{n+2} = g(x_{n+1})$.
+3. **Calcular $\Delta^2 x_n = x_{n+2} - 2x_{n+1} + x_n$.**
+   - Si $\Delta^2 x_n \approx 0$ → no se puede dividir, el proceso se detiene (ver más abajo).
+4. **Calcular el valor acelerado** $\hat{x}_n = x_n - \dfrac{(\Delta x_n)^2}{\Delta^2 x_n}$.
+5. **Verificar el criterio de parada:** si $|\hat{x}_n - x_n| \le \varepsilon$, $\hat{x}_n$ es la raíz aproximada.
+6. **Si no, usar $\hat{x}_n$ como nuevo $x_n$** y repetir desde el paso 2, hasta convergencia o máximo de iteraciones.
+
+*(Aplicar la aceleración una sola vez sobre la sucesión ya generada se conoce como "proceso $\Delta^2$
+de Aitken"; repetir este proceso paso a paso, usando siempre el último valor acelerado como nueva
+semilla — que es justo lo que hace esta calculadora — se conoce como **método de Steffensen**.)*
+
+### ¿Por qué es más rápido?
+
+Donde el punto fijo simple necesita muchos pasos chiquitos para acercarse a la raíz, Aitken
+"salta" directamente a una mejor estimación usando la información de los tres últimos puntos.
+En la práctica esto suele traducirse en **muchas menos iteraciones** para la misma tolerancia
+— por ejemplo, con $f(x) = x^3 - x - 2$, $g(x) = \sqrt[3]{x+2}$ y $x_0 = 1.5$, el punto fijo
+simple necesita 11 iteraciones para una tolerancia de $10^{-10}$, mientras que Aitken llega
+al mismo resultado en solo 3.
+
+### Cuando algo puede salir mal
+
+- **Denominador nulo ($\Delta^2 x_n \approx 0$):** pasa cuando los tres puntos están casi
+  alineados (la sucesión casi no está curvándose). Ahí no se puede dividir, y la calculadora
+  lo marca explícitamente en vez de devolver un número sin sentido.
+- **Inestabilidad numérica:** si $\Delta^2 x_n$ es muy chico (aunque no exactamente cero), dividir
+  por él puede amplificar errores de redondeo. Por eso conviene no confiar ciegamente en
+  iteraciones donde el denominador es casi nulo.
+- Esta calculadora sigue pidiendo el mismo chequeo de Lipschitz ($|g'(x_0)| < 1$) que el punto
+  fijo simple antes de arrancar. En la práctica, Aitken/Steffensen a veces puede converger
+  incluso en casos límite donde la iteración simple es muy lenta — pero seguimos usando el
+  mismo chequeo preliminar para mantener un criterio consistente entre todos los métodos.
+
+### Ventajas y desventajas
+
+| Ventajas | Desventajas |
+|---|---|
+| Acelera notablemente la convergencia lineal de punto fijo | Puede fallar si $\Delta^2 x_n \approx 0$ (división por (casi) cero) |
+| No necesita calcular derivadas de $f$ ni de $g$ para acelerar | Sensible a errores de redondeo cuando el denominador es chico |
+| Convergencia cercana a la cuadrática (similar a Newton-Raphson) cuando funciona bien | Sigue dependiendo de tener una $g(x)$ razonable, igual que punto fijo |
+""")
+
     st.title("Método de Aitken")
 
     # ── f(x) ─────────────────────────────────────────────────────────────────
@@ -224,6 +293,10 @@ def run():
             st.error("Ingresá una tolerancia válida.")
         elif max_iter is None or decimals is None:
             st.error("Ingresá valores válidos para iteraciones y decimales.")
+        elif max_iter < 1:
+            st.error("El número de iteraciones debe ser al menos 1.")
+        elif decimals < 0:
+            st.error("Los decimales deben ser un número entero ≥ 0.")
         elif not lipschitz_ok:
             st.warning(
                 "El criterio de Lipschitz no se cumple: "

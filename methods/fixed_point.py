@@ -115,6 +115,77 @@ def run():
     </style>
     """, unsafe_allow_html=True)
 
+    # ── Teoría (desplegable, arriba de todo) ───────────────────────────────────
+    with st.expander("📘 Teoría: ¿Cómo funciona el Método de Punto Fijo?", expanded=False):
+        st.markdown(r"""
+### ¿Qué es?
+
+El **método de punto fijo** (o iteración de punto fijo) es un método numérico para
+encontrar raíces de $f(x) = 0$. La idea central es **reescribir la ecuación** en la forma
+
+$$x = g(x)$$
+
+despejando $x$ de alguna manera algebraica a partir de $f(x)=0$. Un valor $x^{*}$ que cumple
+$x^{*} = g(x^{*})$ se llama **punto fijo** de $g$, y es exactamente una raíz de la $f$ original.
+
+A partir de un valor inicial $x_0$, se genera una secuencia aplicando $g$ una y otra vez:
+""")
+        st.latex(r"x_{n+1} = g(x_n)")
+        st.markdown(r"""
+Si la secuencia converge, lo hace hacia un punto fijo de $g$ — es decir, hacia una raíz de $f$.
+""")
+
+        st.markdown("### Paso a paso del algoritmo")
+        st.markdown(r"""
+1. **Despejar $x$ de $f(x) = 0$** para obtener una función de iteración $g(x)$ tal que $x = g(x)$.
+   *(Una misma $f$ puede despejarse de varias formas distintas, y no todas convergen igual — más abajo se explica por qué).*
+2. **Elegir un valor inicial $x_0$**, idealmente cercano a la raíz que se busca.
+3. **Calcular el siguiente término:**
+""")
+        st.latex(r"x_{n+1} = g(x_n)")
+        st.markdown(r"""
+4. **Medir el error entre dos iteraciones consecutivas:**
+""")
+        st.latex(r"|x_{n+1} - x_n|")
+        st.markdown(r"""
+5. **Verificar el criterio de parada.** Si $|x_{n+1} - x_n| \le \varepsilon$ (tolerancia),
+   se detiene: $x_{n+1}$ es la raíz aproximada.
+6. **Si no, repetir** desde el paso 3 usando $x_{n+1}$ como nuevo punto de partida,
+   hasta cumplir el criterio de parada o alcanzar el máximo de iteraciones.
+
+### ¿Cuándo converge? — Criterio de Lipschitz / contracción
+
+No cualquier $g(x)$ funciona: la convergencia depende de qué tan "expansiva" o "contractiva"
+es $g$ cerca de la raíz. La condición clásica (ligada al **Teorema del Punto Fijo de Banach**)
+es:
+""")
+        st.latex(r"|g'(x)| < 1")
+        st.markdown(r"""
+en un entorno de la raíz buscada. Cuando se cumple, $g$ es una **contracción** y la iteración
+converge sí o sí desde cualquier $x_0$ suficientemente cercano.
+
+En esta calculadora se evalúa $g'(x_0)$ como una **verificación rápida** (heurística) antes de
+iterar. Hay que tener en cuenta que, en rigor, la condición debería cumplirse en todo un entorno
+de la raíz (que todavía no conocemos) y no solo en el punto de partida — por eso puede pasar que
+el chequeo en $x_0$ dé bien y aun así la iteración no converja, o viceversa. Es una guía útil,
+no una garantía absoluta.
+
+### Velocidad de convergencia
+
+- Es, en general, **convergencia lineal**: el error se reduce en un factor aproximadamente
+  constante ($\approx |g'(x^{*})|$) en cada paso.
+- Cuanto más chico sea $|g'(x^{*})|$, más rápido converge. Si $g'(x^{*}) = 0$, puede llegar a
+  converger más rápido que linealmente.
+
+### Ventajas y desventajas
+
+| Ventajas | Desventajas |
+|---|---|
+| No necesita un intervalo con cambio de signo (a diferencia de bisección) | La convergencia **no está garantizada**: depende totalmente de cómo se elija $g(x)$ |
+| Simple de implementar y de entender | Puede divergir u oscilar si $\lvert g'(x)\rvert \ge 1$ |
+| Puede converger rápido si $g$ está bien elegida | Es sensible a la elección de $x_0$ |
+""")
+
     st.title("Método de Punto Fijo")
 
     # ── f(x) ─────────────────────────────────────────────────────────────────
@@ -206,6 +277,10 @@ def run():
             st.error("Ingresá una tolerancia válida.")
         elif max_iter is None or decimals is None:
             st.error("Ingresá valores válidos para iteraciones y decimales.")
+        elif max_iter < 1:
+            st.error("El número de iteraciones debe ser al menos 1.")
+        elif decimals < 0:
+            st.error("Los decimales deben ser un número entero ≥ 0.")
         elif not lipschitz_ok:
             st.warning(
                 "El criterio de Lipschitz no se cumple: "
