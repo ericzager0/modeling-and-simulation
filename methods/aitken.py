@@ -271,12 +271,14 @@ al mismo resultado en solo 3.
             st.error(f"No se pudo interpretar g(x): {e}")
 
     # ── x₀ ───────────────────────────────────────────────────────────────────
-    x0_str = st.text_input("x₀  (valor inicial)", value="1.5")
+    x0_str = st.text_input("x₀  (valor inicial)", value="1.5",
+                           placeholder="Ej: 1.5 · pi · pi/4 · e**2 · sqrt(2)")
     x0 = None
     try:
-        x0 = float(x0_str)
-    except ValueError:
-        st.error("Valor inválido para x₀")
+        _, ld = _local_dict()
+        x0 = float(sp.sympify(x0_str.replace("^", "**"), locals=ld))
+    except Exception:
+        st.error("Valor inválido para x₀. Ejemplos: 1.5 · pi · pi/4 · e**2 · sqrt(2)")
 
     # ── Criterio de Lipschitz  |g'(x₀)| < 1 ─────────────────────────────────
     lipschitz_ok = False
