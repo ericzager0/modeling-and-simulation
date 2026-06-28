@@ -1,5 +1,7 @@
 import streamlit as st
 import sympy as sp
+import numpy as np
+import plotly.graph_objects as go
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -54,6 +56,23 @@ def _fixed_point(g, x0: float, tol: float, max_iter: int):
             return xn1, rows, True
         xn = xn1
     return xn, rows, False
+
+
+def _cobweb_path(x0: float, rows):
+    """Construye la trayectoria en 'escalera / telaraña' a partir de x0 y las
+    filas de la iteración. Devuelve (xs, ys) listos para graficar con un
+    único trazo de líneas (alterna tramos verticales y horizontales entre
+    la curva g(x) y la recta y = x)."""
+    xs, ys = [x0], [x0]
+    for row in rows:
+        xn, xn1 = row["xn"], row["xn1"]
+        # vertical: de (xn, xn) en la diagonal hasta (xn, g(xn)) en la curva
+        xs.append(xn)
+        ys.append(xn1)
+        # horizontal: de (xn, g(xn)) hasta (g(xn), g(xn)) en la diagonal
+        xs.append(xn1)
+        ys.append(xn1)
+    return xs, ys
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -152,6 +171,29 @@ Si la secuencia converge, lo hace hacia un punto fijo de $g$ — es decir, hacia
    se detiene: $x_{n+1}$ es la raíz aproximada.
 6. **Si no, repetir** desde el paso 3 usando $x_{n+1}$ como nuevo punto de partida,
    hasta cumplir el criterio de parada o alcanzar el máximo de iteraciones.
+
+### Interpretación gráfica: ¿qué representa la recta $y = x$?
+
+Buscar un punto fijo significa buscar un $x^{*}$ tal que $x^{*} = g(x^{*})$. Geométricamente,
+eso equivale a buscar dónde la curva $y = g(x)$ se cruza con la **recta $y = x$** — la diagonal
+donde, por definición, la coordenada $y$ de cualquier punto es igual a su coordenada $x$. Por
+eso, exactamente en el punto donde $g(x)$ corta esa recta se cumple $g(x) = x$: ahí está la
+raíz buscada.
+
+Esa misma recta es también la que permite "trasladar" un resultado de vuelta al eje $x$ para
+poder iterar de nuevo, y es la base del clásico **diagrama de telaraña** (*cobweb diagram*)
+con el que se suele visualizar este método:
+
+1. Se parte de $x_0$ sobre la recta $y=x$ y se traza una línea **vertical** hasta tocar la
+   curva $g(x)$: ese punto tiene altura $g(x_0) = x_1$.
+2. Desde ahí se traza una línea **horizontal** hasta volver a tocar la recta $y=x$: al llegar,
+   la coordenada $x$ de ese punto ya es $x_1$, lista para repetir el paso 1.
+3. Se repite el proceso (vertical hasta $g(x)$, horizontal hasta $y=x$) una y otra vez.
+
+El resultado es una sucesión de escalones que, si el método converge, se va cerrando como una
+telaraña hacia el punto donde $g(x)$ cruza $y=x$ (la raíz). Si diverge, la telaraña se aleja
+de ese cruce en lugar de acercarse — algo que se puede ver directamente en el gráfico de esta
+calculadora.
 
 ### ¿Cuándo converge? — Criterio de Lipschitz / contracción
 
@@ -325,3 +367,110 @@ no una garantía absoluta.
                     f"| {row['xn1']:.{d}f} |"
                 )
             st.markdown("\n".join(lines))
+
+            # ══════════════════════════════════════════════════════════════════
+            # GRÁFICO — diagrama de telaraña: g(x), y = x, trayectoria y x₀
+            # ══════════════════════════════════════════════════════════════════
+            st.markdown("---")
+            st.markdown("### Gráfico (diagrama de telaraña)")
+
+            try:
+                # ── Rango en x: en base a x0 y toda la trayectoria recorrida ──
+                traj_xs = [x0] + [row["xn1"] for row in rows]
+                span_x  = max(traj_xs) - min(traj_xs) if max(traj_xs) != min(traj_xs) else 1.0
+                pad     = max(span_x * 0.6, 1.0)
+                x_lo    = min(traj_xs) - pad
+                x_hi    = max(traj_xs) + pad
+                x_plot  = np.linspace(x_lo, x_hi, 600)
+
+                # ── Evaluar g(x) en el rango ──────────────────────────────
+                y_g_raw = np.array(g(x_plot), dtype=float)
+                y_g_raw = np.where(np.isfinite(y_g_raw), y_g_raw, np.nan)
+
+                # Rango y de referencia: percentiles de g(x) + la trayectoria
+                finite_g = y_g_raw[np.isfinite(y_g_raw)]
+                p5, p95  = (np.percentile(finite_g, [5, 95]) if len(finite_g) > 1
+                            else (x_lo, x_hi))
+                refs  = np.array(traj_xs + [float(p5), float(p95), x_lo, x_hi])
+                y_rng = max(float(refs.max() - refs.min()), 0.5)
+                y_lo  = float(refs.min()) - y_rng * 0.15
+                y_hi  = float(refs.max()) + y_rng * 0.15
+
+                # Clip: valores que sobrepasan el rango visible se ocultan
+                y_g = np.where((y_g_raw >= y_lo - y_rng) & (y_g_raw <= y_hi + y_rng),
+                               y_g_raw, np.nan)
+
+                fig = go.Figure()
+
+                # ── Recta y = x ─────────────────────────────────────────
+                fig.add_trace(go.Scatter(
+                    x=[x_lo, x_hi], y=[x_lo, x_hi],
+                    mode="lines", name="y = x",
+                    line=dict(color="#16a34a", width=2, dash="dash"),
+                ))
+
+                # ── g(x) ────────────────────────────────────────────────
+                fig.add_trace(go.Scatter(
+                    x=x_plot, y=y_g,
+                    mode="lines", name="g(x)",
+                    line=dict(color="#2563eb", width=2.5),
+                ))
+
+                # ── Trayectoria (telaraña) ───────────────────────────────
+                cob_x, cob_y = _cobweb_path(x0, rows)
+                fig.add_trace(go.Scatter(
+                    x=cob_x, y=cob_y,
+                    mode="lines",
+                    name="Trayectoria",
+                    line=dict(color="#f97316", width=1.8),
+                ))
+
+                # ── x₀ ────────────────────────────────────────────────────
+                fig.add_trace(go.Scatter(
+                    x=[x0], y=[x0],
+                    mode="markers+text",
+                    name=f"x₀ = {x0:.{d}f}",
+                    marker=dict(color="#9333ea", size=11, symbol="circle",
+                                line=dict(color="white", width=2)),
+                    text=[f"x₀ = {x0:.{d}f}"],
+                    textposition="bottom center",
+                    textfont=dict(size=11),
+                ))
+
+                # ── Raíz / punto fijo hallado ─────────────────────────────
+                fig.add_vline(
+                    x=root,
+                    line=dict(color="rgba(120,120,120,0.6)", width=1.5, dash="dot"),
+                )
+                fig.add_trace(go.Scatter(
+                    x=[root], y=[root],
+                    mode="markers",
+                    name=f"x* = {root:.{d}f}",
+                    marker=dict(color="#dc2626", size=13, symbol="diamond",
+                                line=dict(color="white", width=2)),
+                ))
+
+                # ── Layout ────────────────────────────────────────────────
+                fig.update_layout(
+                    xaxis_title="x",
+                    yaxis_title="g(x)",
+                    yaxis=dict(range=[y_lo, y_hi]),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                                xanchor="right", x=1),
+                    margin=dict(l=50, r=20, t=50, b=50),
+                    hovermode="closest",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                )
+                fig.update_xaxes(
+                    showgrid=True, gridcolor="rgba(128,128,128,0.15)",
+                    zeroline=True, zerolinecolor="rgba(128,128,128,0.35)", zerolinewidth=1,
+                )
+                fig.update_yaxes(
+                    showgrid=True, gridcolor="rgba(128,128,128,0.15)",
+                    zeroline=True, zerolinecolor="rgba(128,128,128,0.35)", zerolinewidth=1,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+            except Exception as _graph_err:
+                st.warning(f"No se pudo generar el gráfico: {_graph_err}")

@@ -1,5 +1,7 @@
 import streamlit as st
 import sympy as sp
+import numpy as np
+import plotly.graph_objects as go
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -29,6 +31,34 @@ def _parse(func_str: str):
     # numpy resuelve exp/sin/cos/log sin conflictos de tipos
     f = sp.lambdify(x, expr, modules=["numpy"])
     return f, sp.latex(expr)
+
+
+def _parse_number(num_str: str) -> float:
+    """Evalúa una expresión numérica fija (sin la variable x) y la devuelve
+    como float. Acepta pi, e, sqrt(...), exp(...), fracciones, exponentes,
+    funciones trigonométricas/log, etc. — por ejemplo: 'pi/4', 'sqrt(2)',
+    'e**2'. Si la expresión depende de x (o de cualquier otra variable),
+    lanza una excepción en vez de devolver un resultado sin sentido, porque
+    a y b tienen que ser números fijos, no funciones de x."""
+    local_dict = {
+        "e":    sp.E,
+        "E":    sp.E,
+        "pi":   sp.pi,
+        "ln":   sp.log,
+        "log":  sp.log,
+        "exp":  sp.exp,
+        "sin":  sp.sin,
+        "cos":  sp.cos,
+        "tan":  sp.tan,
+        "sqrt": sp.sqrt,
+        "Abs":  sp.Abs,
+        "abs":  sp.Abs,
+    }
+    expr = sp.sympify(num_str.replace("^", "**"), locals=local_dict)
+    if expr.free_symbols:
+        vars_str = ", ".join(str(s) for s in expr.free_symbols)
+        raise ValueError(f"no puede depender de variables ({vars_str})")
+    return float(expr)
 
 
 def _bisect(f, a: float, b: float, tol: float, max_iter: int):
@@ -191,20 +221,20 @@ La cota de error después de $n$ iteraciones es:
 
     # ── Intervalo [a, b] ──────────────────────────────────────────────────────
     col_a, col_b = st.columns(2)
-    a_str = col_a.text_input("a", value="1")
-    b_str = col_b.text_input("b", value="2")
+    a_str = col_a.text_input("a", value="1", placeholder="Ej: 1,  pi/4,  sqrt(2),  e**2")
+    b_str = col_b.text_input("b", value="2", placeholder="Ej: 2,  pi,  -sqrt(3),  exp(1)")
     try:
-        a = float(a_str)
-    except ValueError:
+        a = _parse_number(a_str)
+    except Exception as e:
         a = None
-        col_a.error("Valor inválido")
+        col_a.error(f"No se pudo interpretar: {e}")
     try:
-        b = float(b_str)
-    except ValueError:
+        b = _parse_number(b_str)
+    except Exception as e:
         b = None
-        col_b.error("Valor inválido")
+        col_b.error(f"No se pudo interpretar: {e}")
     if a is not None and b is not None:
-        st.latex(rf"[a,\; b] = [{a},\; {b}]")
+        st.latex(rf"[a,\; b] = [{a:.6g},\; {b:.6g}]")
 
     # ── Bolzano ───────────────────────────────────────────────────────────────
     bolzano_ok = False
@@ -306,3 +336,101 @@ La cota de error después de $n$ iteraciones es:
                     f"| {row['fc']:.{d}f} |"
                 )
             st.markdown("\n".join(lines))
+
+            # ══════════════════════════════════════════════════════════════════
+            # GRÁFICO — f(x) con el intervalo inicial [a, b] y la raíz hallada
+            # ══════════════════════════════════════════════════════════════════
+            st.markdown("---")
+            st.markdown("### Gráfico")
+
+            try:
+                # ── Rango en x: alrededor de [a, b] y la raíz, con margen ──
+                pts_x  = [a, b, root]
+                span_x = max(pts_x) - min(pts_x) if max(pts_x) != min(pts_x) else 1.0
+                pad    = max(span_x * 0.5, 1.0)
+                x_lo   = min(pts_x) - pad
+                x_hi   = max(pts_x) + pad
+                x_plot = np.linspace(x_lo, x_hi, 600)
+
+                # ── Evaluar f(x) ────────────────────────────────────────
+                y_f_raw = np.array(f(x_plot), dtype=float)
+                y_f_raw = np.where(np.isfinite(y_f_raw), y_f_raw, np.nan)
+
+                # Rango y de referencia: percentiles de f(x) + puntos clave
+                finite_f = y_f_raw[np.isfinite(y_f_raw)]
+                p5, p95  = (np.percentile(finite_f, [5, 95]) if len(finite_f) > 1
+                            else (-1.0, 1.0))
+                refs  = np.array([0.0, p5, p95])
+                y_rng = max(float(refs.max() - refs.min()), 0.5)
+                y_lo  = float(refs.min()) - y_rng * 0.2
+                y_hi  = float(refs.max()) + y_rng * 0.2
+
+                # Clip: valores que sobrepasan el rango visible se ocultan
+                y_f = np.where((y_f_raw >= y_lo - y_rng) & (y_f_raw <= y_hi + y_rng),
+                               y_f_raw, np.nan)
+
+                fig = go.Figure()
+
+                # ── Intervalo inicial [a, b] sombreado ──────────────────
+                fig.add_vrect(
+                    x0=a, x1=b,
+                    fillcolor="rgba(37,99,235,0.07)", line_width=0,
+                    layer="below",
+                )
+
+                # ── f(x) ────────────────────────────────────────────────
+                fig.add_trace(go.Scatter(
+                    x=x_plot, y=y_f,
+                    mode="lines", name="f(x)",
+                    line=dict(color="#2563eb", width=2.5),
+                ))
+
+                # ── Extremos del intervalo: a y b ────────────────────────
+                fig.add_trace(go.Scatter(
+                    x=[a, b], y=[float(f(a)), float(f(b))],
+                    mode="markers+text",
+                    name="Intervalo [a, b]",
+                    marker=dict(color="#9333ea", size=11, symbol="circle",
+                                line=dict(color="white", width=2)),
+                    text=[f"a = {a:.{d}f}", f"b = {b:.{d}f}"],
+                    textposition="top center",
+                    textfont=dict(size=11),
+                ))
+
+                # ── Raíz hallada ──────────────────────────────────────────
+                fig.add_vline(
+                    x=root,
+                    line=dict(color="rgba(120,120,120,0.6)", width=1.5, dash="dot"),
+                )
+                fig.add_trace(go.Scatter(
+                    x=[root], y=[0.0],
+                    mode="markers",
+                    name=f"Raíz x* = {root:.{d}f}",
+                    marker=dict(color="#dc2626", size=13, symbol="diamond",
+                                line=dict(color="white", width=2)),
+                ))
+
+                # ── Layout ────────────────────────────────────────────────
+                fig.update_layout(
+                    xaxis_title="x",
+                    yaxis_title="f(x)",
+                    yaxis=dict(range=[y_lo, y_hi]),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                                xanchor="right", x=1),
+                    margin=dict(l=50, r=20, t=50, b=50),
+                    hovermode="x unified",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                )
+                fig.update_xaxes(
+                    showgrid=True, gridcolor="rgba(128,128,128,0.15)",
+                    zeroline=True, zerolinecolor="rgba(128,128,128,0.35)", zerolinewidth=1,
+                )
+                fig.update_yaxes(
+                    showgrid=True, gridcolor="rgba(128,128,128,0.15)",
+                    zeroline=True, zerolinecolor="rgba(128,128,128,0.35)", zerolinewidth=1,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+            except Exception as _graph_err:
+                st.warning(f"No se pudo generar el gráfico: {_graph_err}")

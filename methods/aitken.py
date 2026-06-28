@@ -1,5 +1,7 @@
 import streamlit as st
 import sympy as sp
+import numpy as np
+import plotly.graph_objects as go
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -72,6 +74,39 @@ def _aitken(g, x0: float, tol: float, max_iter: int):
             return xstar, rows, True
         xn = xstar
     return xn, rows, False
+
+
+def _cobweb_path_aitken(x0: float, rows):
+    """Construye dos trayectorias separadas para el diagrama de telaraña de
+    Aitken/Steffensen:
+
+       - (real_x, real_y): los pasos GENUINOS de iteración simple, dos por cada
+         ciclo (xn -> xn1 -> xn2), dibujados como los escalones vertical/horizontal
+         de siempre. Cada ciclo se separa del anterior con un None para que
+         Plotly no los conecte entre sí con una línea recta.
+       - (jump_x, jump_y): los SALTOS de extrapolación de Aitken, de (xn2, xn2)
+         a (x̂n, x̂n). No son evaluaciones de g(x) — son la fórmula de Aitken — y
+         por eso van en una serie aparte, para graficarse con otro estilo y no
+         confundirse con un paso real de la iteración.
+    """
+    real_x, real_y = [], []
+    jump_x, jump_y = [], []
+    for row in rows:
+        xn, xn1, xn2, xstar = row["xn"], row["xn1"], row["xn2"], row["xstar"]
+
+        if real_x:
+            real_x.append(None)
+            real_y.append(None)
+        # escalón 1: (xn,xn)   -> (xn,xn1)   -> (xn1,xn1)
+        # escalón 2: (xn1,xn1) -> (xn1,xn2)  -> (xn2,xn2)
+        real_x += [xn, xn, xn1, xn1, xn2]
+        real_y += [xn, xn1, xn1, xn2, xn2]
+
+        if xstar is not None:
+            jump_x += [xn2, xstar, None]
+            jump_y += [xn2, xstar, None]
+
+    return real_x, real_y, jump_x, jump_y
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -358,3 +393,133 @@ al mismo resultado en solo 3.
                     f"| {xstar_str} |"
                 )
             st.markdown("\n".join(lines))
+
+            # ══════════════════════════════════════════════════════════════════
+            # GRÁFICO — telaraña de los pasos reales de g(x) + saltos de Aitken
+            # ══════════════════════════════════════════════════════════════════
+            st.markdown("---")
+            st.markdown("### Gráfico (telaraña + saltos de extrapolación)")
+            st.caption(
+                "🟠 Pasos reales de la iteración simple, g(xₙ).   "
+                "🟢 punteado: salto de extrapolación de Aitken — no es una evaluación de "
+                "g(x), es la fórmula x̂ₙ = xₙ − (Δxₙ)²/Δ²xₙ, por eso avanza sobre la "
+                "diagonal y = x en vez de subir hasta la curva."
+            )
+
+            try:
+                # ── Rango en x: x0 + todos los valores recorridos / saltados ──
+                traj_xs = [x0]
+                for row in rows:
+                    traj_xs += [row["xn1"], row["xn2"]]
+                    if row["xstar"] is not None:
+                        traj_xs.append(row["xstar"])
+
+                span_x = max(traj_xs) - min(traj_xs) if max(traj_xs) != min(traj_xs) else 1.0
+                pad    = max(span_x * 0.6, 1.0)
+                x_lo   = min(traj_xs) - pad
+                x_hi   = max(traj_xs) + pad
+                x_plot = np.linspace(x_lo, x_hi, 600)
+
+                # ── Evaluar g(x) en el rango ──────────────────────────────
+                y_g_raw = np.array(g(x_plot), dtype=float)
+                y_g_raw = np.where(np.isfinite(y_g_raw), y_g_raw, np.nan)
+
+                # Rango y de referencia: percentiles de g(x) + la trayectoria
+                finite_g = y_g_raw[np.isfinite(y_g_raw)]
+                p5, p95  = (np.percentile(finite_g, [5, 95]) if len(finite_g) > 1
+                            else (x_lo, x_hi))
+                refs  = np.array(traj_xs + [float(p5), float(p95), x_lo, x_hi])
+                y_rng = max(float(refs.max() - refs.min()), 0.5)
+                y_lo  = float(refs.min()) - y_rng * 0.15
+                y_hi  = float(refs.max()) + y_rng * 0.15
+
+                # Clip: valores que sobrepasan el rango visible se ocultan
+                y_g = np.where((y_g_raw >= y_lo - y_rng) & (y_g_raw <= y_hi + y_rng),
+                               y_g_raw, np.nan)
+
+                # ── Trayectorias: pasos reales vs. saltos de Aitken ─────────
+                real_x, real_y, jump_x, jump_y = _cobweb_path_aitken(x0, rows)
+
+                fig = go.Figure()
+
+                # ── Recta y = x ─────────────────────────────────────────
+                fig.add_trace(go.Scatter(
+                    x=[x_lo, x_hi], y=[x_lo, x_hi],
+                    mode="lines", name="y = x",
+                    line=dict(color="#16a34a", width=2, dash="dash"),
+                ))
+
+                # ── g(x) ────────────────────────────────────────────────
+                fig.add_trace(go.Scatter(
+                    x=x_plot, y=y_g,
+                    mode="lines", name="g(x)",
+                    line=dict(color="#2563eb", width=2.5),
+                ))
+
+                # ── Pasos reales (telaraña genuina) ───────────────────────
+                fig.add_trace(go.Scatter(
+                    x=real_x, y=real_y,
+                    mode="lines",
+                    name="Pasos reales: g(xₙ)",
+                    line=dict(color="#f97316", width=1.8),
+                ))
+
+                # ── Saltos de extrapolación de Aitken ─────────────────────
+                if jump_x:
+                    fig.add_trace(go.Scatter(
+                        x=jump_x, y=jump_y,
+                        mode="lines+markers",
+                        name="Salto de Aitken (extrapolación)",
+                        line=dict(color="#0d9488", width=2.4, dash="dot"),
+                        marker=dict(color="#0d9488", size=7, symbol="circle"),
+                    ))
+
+                # ── x₀ ────────────────────────────────────────────────────
+                fig.add_trace(go.Scatter(
+                    x=[x0], y=[x0],
+                    mode="markers+text",
+                    name=f"x₀ = {x0:.{d}f}",
+                    marker=dict(color="#9333ea", size=11, symbol="circle",
+                                line=dict(color="white", width=2)),
+                    text=[f"x₀ = {x0:.{d}f}"],
+                    textposition="bottom center",
+                    textfont=dict(size=11),
+                ))
+
+                # ── Raíz / punto fijo hallado ─────────────────────────────
+                fig.add_vline(
+                    x=root,
+                    line=dict(color="rgba(120,120,120,0.6)", width=1.5, dash="dot"),
+                )
+                fig.add_trace(go.Scatter(
+                    x=[root], y=[root],
+                    mode="markers",
+                    name=f"x* = {root:.{d}f}",
+                    marker=dict(color="#dc2626", size=13, symbol="diamond",
+                                line=dict(color="white", width=2)),
+                ))
+
+                # ── Layout ────────────────────────────────────────────────
+                fig.update_layout(
+                    xaxis_title="x",
+                    yaxis_title="g(x)",
+                    yaxis=dict(range=[y_lo, y_hi]),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                                xanchor="right", x=1),
+                    margin=dict(l=50, r=20, t=50, b=50),
+                    hovermode="closest",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                )
+                fig.update_xaxes(
+                    showgrid=True, gridcolor="rgba(128,128,128,0.15)",
+                    zeroline=True, zerolinecolor="rgba(128,128,128,0.35)", zerolinewidth=1,
+                )
+                fig.update_yaxes(
+                    showgrid=True, gridcolor="rgba(128,128,128,0.15)",
+                    zeroline=True, zerolinecolor="rgba(128,128,128,0.35)", zerolinewidth=1,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+            except Exception as _graph_err:
+                st.warning(f"No se pudo generar el gráfico: {_graph_err}")
