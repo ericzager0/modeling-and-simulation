@@ -244,11 +244,125 @@ _TRUNC_CFG = {
 }
 
 
+def _max_abs_on_interval(expr, x_sym, a, b):
+    """
+    Calcula de forma EXACTA (simbólica) el máximo de |expr| en [a, b].
+
+    Estrategia (estándar de cálculo / análisis numérico):
+      1. Encontrar los puntos críticos de expr en (a, b): expr' = 0.
+      2. Filtrar los que son reales y caen dentro de (a, b).
+      3. Evaluar |expr| en los puntos críticos y en los extremos a, b.
+      4. El máximo de esos valores es el máximo absoluto buscado.
+
+    Devuelve (max_val: float, x_max: float, candidatos: list[(x, |expr(x)|)])
+    """
+    deriv = sp.diff(expr, x_sym)
+
+    # Puntos críticos (raíces de la derivada) dentro de (a, b)
+    crit_points = []
+    try:
+        sols = sp.solve(sp.Eq(deriv, 0), x_sym)
+    except Exception:
+        sols = []
+
+    for s in sols:
+        try:
+            s_val = complex(s.evalf())
+        except Exception:
+            continue
+        # descartar soluciones no reales
+        if abs(s_val.imag) > 1e-9:
+            continue
+        s_real = s_val.real
+        if a - 1e-9 <= s_real <= b + 1e-9:
+            # clamp por seguridad numérica a los bordes del intervalo
+            s_real = min(max(s_real, a), b)
+            crit_points.append(s_real)
+
+    # Candidatos: extremos del intervalo + puntos críticos
+    candidatos_x = [a, b] + crit_points
+
+    # Evaluar |expr| en cada candidato (numéricamente, vía SymPy para exactitud)
+    candidatos = []
+    for xv in candidatos_x:
+        try:
+            val = abs(float(expr.subs(x_sym, xv).evalf()))
+            if np.isnan(val) or np.isinf(val):
+                continue
+            candidatos.append((xv, val))
+        except Exception:
+            continue
+
+    if not candidatos:
+        raise ValueError("No se pudo evaluar la derivada en el intervalo dado.")
+
+    x_max, max_val = max(candidatos, key=lambda t: t[1])
+    return max_val, x_max, candidatos
+
+
+def _show_max_error(method, deriv_expr, deriv_latex, a, b, h, d, a_str, b_str):
+    """
+    Error Máximo Posible (cota de error): usa el máximo EXACTO de |derivada|
+    en [a, b] en lugar de un ξ puntual. No requiere que el usuario ingrese ξ.
+    """
+    al, bl = _val_latex(a_str), _val_latex(b_str)
+    cfg    = _TRUNC_CFG[method]
+    coeff  = cfg["coeff_fn"](b - a, h)
+
+    st.markdown("#### 🔺 Error Máximo Posible (cota de error)")
+    st.markdown(
+        "En lugar de evaluar en un ξ puntual, acotamos el error usando el "
+        f"**máximo de $|{cfg['dx_name']}|$** en todo el intervalo "
+        f"$[{a_str}, {b_str}]$. Esto da el **peor caso posible** del error, "
+        "sin necesidad de conocer ξ."
+    )
+
+    x_sym = sp.Symbol("x")
+    try:
+        max_val, x_max, candidatos = _max_abs_on_interval(deriv_expr, x_sym, a, b)
+    except Exception as exc:
+        st.warning(f"No se pudo calcular el máximo exacto de la derivada: {exc}")
+        return
+
+    # Tabla de candidatos (extremos + puntos críticos)
+    rows = [
+        r"| Punto candidato | $|{}|$ |".format(cfg["dx_name"]),
+        "|:---:|:---:|",
+    ]
+    for xv, val in sorted(candidatos, key=lambda t: t[0]):
+        rows.append(f"| {_fmt(xv, d)} | {_fmt(val, d)} |")
+    st.markdown(
+        "**Candidatos a máximo** (extremos del intervalo + puntos críticos "
+        f"donde $\\frac{{d}}{{dx}}{cfg['dx_name']} = 0$):\n\n"
+        + "\n".join(rows)
+    )
+
+    deriv_func_name = {
+        "f''(x)":     "f''",
+        "f^{(4)}(x)": "f^{(4)}",
+    }.get(cfg["dx_name"], cfg["dx_name"])
+    st.latex(
+        rf"\max_{{x\,\in\,[{al},\,{bl}]}} \left|{cfg['dx_name']}\right|"
+        rf"= \left|{deriv_func_name}({_fmt(x_max, d)})\right|"
+        rf"= {_fmt(max_val, d)}"
+    )
+
+    error_max = abs(coeff) * max_val
+    st.markdown("**Cota del error máximo:**")
+    st.latex(
+        rf"E_{{max}} \approx \left|{cfg['coeff_tex'](bl, al, h, d)}\right| \cdot "
+        rf"\max\left|{cfg['dx_name']}\right| "
+        rf"= {_fmt(abs(coeff), d)} \cdot {_fmt(max_val, d)} = {_fmt(error_max, d)}"
+    )
+    st.latex(rf"\boxed{{\ |E| \leq {error_max:.{d}f}\ }}")
+
+
 def _show_truncation_error(method, expr, x_sym, a, b, n, h, xi, xi_str, d, a_str, b_str):
     """
     Sección de Error de Truncamiento.
-    Muestra la fórmula, la derivada simbólica, y — si xi fue ingresado —
-    evalúa el error puntual en ξ.
+    Muestra la fórmula, la derivada simbólica, el ERROR MÁXIMO POSIBLE
+    (calculado de forma exacta a partir del máximo de la derivada en [a,b],
+    sin necesitar ξ) y — si el usuario ingresó ξ — el error puntual en ξ.
     """
     al, bl = _val_latex(a_str), _val_latex(b_str)
     cfg    = _TRUNC_CFG[method]
@@ -282,7 +396,13 @@ def _show_truncation_error(method, expr, x_sym, a, b, n, h, xi, xi_str, d, a_str
     st.markdown("**Derivada necesaria:**")
     st.latex(rf"{cfg['dx_name']} = {deriv_latex}")
 
-    # — Evaluación en ξ (opcional)
+    # — Error Máximo Posible (NO requiere ξ) ──────────────────────────────────
+    st.markdown("")
+    _show_max_error(method, deriv_expr, deriv_latex, a, b, h, d, a_str, b_str)
+
+    # — Evaluación puntual en ξ (opcional) ────────────────────────────────────
+    st.markdown("")
+    st.markdown("#### 📍 Error Puntual en ξ (opcional)")
     if xi is not None:
         # Advertencia si ξ ∉ [a, b]
         if not (a <= xi <= b):
@@ -310,7 +430,8 @@ def _show_truncation_error(method, expr, x_sym, a, b, n, h, xi, xi_str, d, a_str
     else:
         st.info(
             "💡 Ingresá un valor de **ξ** en el campo de entrada para calcular "
-            "el error de truncamiento puntual."
+            "además el error de truncamiento puntual (no es necesario para el "
+            "error máximo posible, que ya se calculó arriba)."
         )
 
 
@@ -643,9 +764,10 @@ def run():
         value="",
         placeholder="Ej: 0.5  |  pi/4  |  (a+b)/2  — debe pertenecer a [a, b]",
         help=(
-            "La fórmula del error de truncamiento depende de la derivada de f "
-            "evaluada en algún ξ ∈ (a, b) (Teorema del Valor Medio). "
-            "Si ingresás un valor, se calcula el error puntual para ese ξ."
+            "El error máximo posible se calcula automáticamente usando el máximo "
+            "exacto de la derivada en [a, b], sin necesitar ξ. "
+            "Si además querés el error puntual evaluado en un ξ ∈ (a, b) específico "
+            "(Teorema del Valor Medio), ingresalo acá."
         ),
     )
     xi = None
