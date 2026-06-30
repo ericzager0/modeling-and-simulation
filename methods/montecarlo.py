@@ -460,7 +460,26 @@ def run():
         > **💡 Sobre el comportamiento del Error:**
         > Al observar la fórmula del Error Estándar, notamos que el término $\sqrt{N}$ está en el denominador. La convergencia de Monte Carlo es del orden de $\mathcal{O}(1/\sqrt{N})$. Esto significa que **para reducir el error a la mitad, no basta con duplicar los puntos: es necesario cuadruplicar el tamaño de la muestra ($4N$)**.
         """)
+                # ── NUEVA SECCIÓN DE CURIOSIDAD ──────────────────────────────────────────
+                st.markdown("---")
+                st.markdown(r'### 🎲 Curiosidad: El "Hola Mundo" de Monte Carlo (Estimando $\pi$)')
+                st.markdown(r"""
+        Es posible utilizar esta misma lógica probabilística para estimar el valor de $\pi$. Imagina un tablero cuadrado perfecto de lado $2r$, y dentro de él, dibujamos un círculo inscrito de radio $r$. 
 
+        Si dividimos el área del círculo por el área del cuadrado, la geometría nos da una proporción exacta:
+        """)
+                st.latex(r"\frac{A_{\text{círculo}}}{A_{\text{cuadrado}}} = \frac{\pi r^2}{(2r)^2} = \frac{\pi r^2}{4r^2} = \frac{\pi}{4}")
+
+                st.markdown(r"""
+        Ahora entra **Monte Carlo**: En lugar de medir áreas, disparamos $N$ puntos aleatorios ("dardos") de forma uniforme hacia el cuadrado. La proporción de dardos que caigan *dentro* del círculo ($N_{\text{adentro}}$) tenderá a igualar esa misma relación matemática. Si despejamos $\pi$, obtenemos nuestra fórmula de estimación:
+        """)
+                st.latex(r"\pi \approx 4 \cdot \frac{N_{\text{adentro}}}{N_{\text{total}}}")
+
+                st.markdown(r"""
+        **¿Por qué no usamos esto en la práctica para calcular $\pi$?**
+        Aquí es donde la teoría choca con la realidad del muestreo. Como vimos en el comportamiento del Error Estándar, la convergencia es extremadamente lenta ($\mathcal{O}(1/\sqrt{N})$). Para ganar apenas un decimal extra de precisión en nuestro número $\pi$, tendríamos que multiplicar la cantidad de puntos generados por 100. Llegar a una alta precisión requiere miles de millones de iteraciones, haciéndolo un método computacionalmente ineficiente para este fin, ¡pero fascinante como herramienta pedagógica!
+        """)   
+                    
     st.title("Integración por Monte Carlo")
 
     # ── Dimensiones ──────────────────────────────────────────────────────────
