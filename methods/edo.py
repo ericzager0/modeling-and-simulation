@@ -166,6 +166,215 @@ def _solve_exact(expr, t0: float, y0: float):
     return None, None
 
 
+def _classify_hint_es(expr, x, y):
+    """Devuelve el nombre del primer 'hint' que sympy usaría para resolver
+    la EDO (vía classify_ode), en formato legible, o None si no se puede
+    clasificar."""
+    yf = sp.Function("y")
+    ode_eq = sp.Eq(yf(x).diff(x), expr.subs(y, yf(x)))
+    try:
+        hints = sp.classify_ode(ode_eq, yf(x))
+        if hints:
+            return hints[0].replace("_", " ")
+    except Exception:
+        pass
+    return None
+
+
+def _real_const(csol_list):
+    """Dada una lista de soluciones candidatas para la constante C (resultado
+    de sp.solve), devuelve la primera que sea real, o None si ninguna lo es.
+    Esto evita mostrar pasos con una rama compleja espuria (p.ej. originada
+    por log de un número negativo)."""
+    for cs in csol_list:
+        try:
+            cs_s = sp.simplify(cs)
+            if cs_s.is_real is False:
+                continue
+            if abs(complex(cs_s).imag) > 1e-9:
+                continue
+            return cs_s
+        except Exception:
+            continue
+    return None
+
+
+def _build_solution_steps(expr, t0: float, y0: float, y_ex_expr):
+    """
+    Construye, en la medida de lo posible, una explicación paso a paso de
+    cómo se llega a la solución exacta `y_ex_expr` de  y' = expr,  y(t0)=y0.
+
+    Devuelve una lista de tuplas ('md', texto_markdown) | ('latex', codigo_latex)
+    para ser renderizadas en la UI. Se reconocen automáticamente tres familias
+    de EDO de primer orden (las más comunes en la práctica):
+
+      1) Integración directa   →  y' = g(x)               (no depende de y)
+      2) Variables separables  →  y' = g(x) · h(y)
+      3) Lineal de 1er orden   →  y' + P(x) y = Q(x)
+
+    Si la ecuación no encaja en ninguno de estos esquemas (p.ej. Bernoulli,
+    exacta, homogénea, etc.) se devuelve una explicación más general que
+    identifica el tipo de ecuación detectado por SymPy y muestra la solución
+    final ya verificada.
+    """
+    x, y, _ = _local_dict()
+    expr = sp.sympify(expr)
+    x0_l = sp.nsimplify(t0, rational=True)
+    y0_l = sp.nsimplify(y0, rational=True)
+    C = sp.Symbol("C")
+
+    # ── Caso 1: integración directa (el lado derecho no depende de y) ──────
+    if y not in expr.free_symbols:
+        try:
+            steps = []
+            steps.append(("md",
+                "**Tipo de ecuación: integración directa.** El lado derecho "
+                "no depende de $y$, por lo que la ecuación se resuelve "
+                "integrando directamente respecto de $x$."))
+            steps.append(("latex", rf"\frac{{dy}}{{dx}} = {sp.latex(expr)}"))
+            steps.append(("md", "Se integran ambos miembros respecto de $x$:"))
+            G = sp.integrate(expr, x)
+            steps.append(("latex",
+                rf"y(x) = \int \Big({sp.latex(expr)}\Big)\,dx = {sp.latex(G)} + C"))
+            Csol = sp.solve(sp.Eq(G.subs(x, x0_l) + C, y0_l), C)
+            Cval = _real_const(Csol)
+            if Cval is not None:
+                steps.append(("md",
+                    rf"Se aplica la condición inicial $y({_fmt(t0)})={_fmt(y0)}$ "
+                    rf"para hallar $C$:"))
+                steps.append(("latex",
+                    rf"{sp.latex(G.subs(x, x0_l))} + C = {sp.latex(y0_l)} "
+                    rf"\;\;\Longrightarrow\;\; C = {sp.latex(Cval)}"))
+                steps.append(("md", "**Solución particular:**"))
+                steps.append(("latex",
+                    rf"y(x) = {sp.latex(sp.simplify(G + Cval))}"))
+                return steps
+        except Exception:
+            pass
+
+    # ── Caso 2: variables separables  y' = g(x)·h(y) ────────────────────────
+    try:
+        sep = sp.separatevars(sp.together(sp.expand(expr)), symbols=(x, y), dict=True)
+    except Exception:
+        sep = None
+
+    if isinstance(sep, dict):
+        g = sp.simplify(sep.get("coeff", sp.Integer(1)) * sep.get(x, sp.Integer(1)))
+        h = sp.simplify(sep.get(y, sp.Integer(1)))
+        if y in h.free_symbols:
+            try:
+                steps = []
+                steps.append(("md",
+                    "**Tipo de ecuación: variables separables.** El lado "
+                    "derecho puede escribirse como el producto de una función "
+                    "de $x$ por una función de $y$, lo que permite agrupar "
+                    "cada variable a un lado de la igualdad."))
+                steps.append(("latex",
+                    rf"\frac{{dy}}{{dx}} = \underbrace{{{sp.latex(g)}}}_{{g(x)}}"
+                    rf"\;\cdot\;\underbrace{{{sp.latex(h)}}}_{{h(y)}}"))
+                steps.append(("md",
+                    "Se separan las variables, dividiendo por $h(y)$ "
+                    "(suponiendo $h(y)\\neq 0$):"))
+                steps.append(("latex",
+                    rf"\frac{{dy}}{{{sp.latex(h)}}} = {sp.latex(g)}\;dx"))
+                steps.append(("md", "Se integra cada miembro por separado:"))
+                H = sp.integrate(1 / h, y)
+                G = sp.integrate(g, x)
+                steps.append(("latex",
+                    rf"\int \frac{{dy}}{{{sp.latex(h)}}} = \int {sp.latex(g)}\;dx"))
+                steps.append(("latex", rf"{sp.latex(H)} = {sp.latex(G)} + C"))
+                Csol = sp.solve(sp.Eq(H.subs(y, y0_l), G.subs(x, x0_l) + C), C)
+                Cval = _real_const(Csol)
+                if Cval is not None:
+                    steps.append(("md",
+                        rf"Se aplica la condición inicial $y({_fmt(t0)})={_fmt(y0)}$ "
+                        rf"para hallar $C$:"))
+                    steps.append(("latex",
+                        rf"{sp.latex(H.subs(y, y0_l))} = {sp.latex(G.subs(x, x0_l))} + C "
+                        rf"\;\;\Longrightarrow\;\; C = {sp.latex(Cval)}"))
+                    steps.append(("md",
+                        "Reemplazando $C$ y despejando $y$ se obtiene la "
+                        "solución particular:"))
+                    steps.append(("latex",
+                        rf"{sp.latex(H)} = {sp.latex(G)} + \left({sp.latex(Cval)}\right)"))
+                    steps.append(("latex",
+                        rf"y(x) = {sp.latex(sp.simplify(y_ex_expr))}"))
+                    return steps
+            except Exception:
+                pass
+
+    # ── Caso 3: lineal de primer orden  y' + P(x) y = Q(x) ──────────────────
+    try:
+        poly = sp.Poly(sp.expand(expr), y)
+        deg  = poly.degree()
+    except Exception:
+        poly, deg = None, None
+
+    if poly is not None and deg is not None and deg <= 1:
+        coeffs = poly.all_coeffs()
+        a1, a0 = (coeffs if deg == 1 else (sp.Integer(0), coeffs[0] if coeffs else sp.Integer(0)))
+        if y not in a1.free_symbols and y not in a0.free_symbols:
+            P = sp.simplify(-a1)
+            Q = sp.simplify(a0)
+            try:
+                steps = []
+                steps.append(("md",
+                    "**Tipo de ecuación: lineal de primer orden.** Se puede "
+                    "escribir en la forma estándar $y' + P(x)\\,y = Q(x)$, lo "
+                    "que permite resolverla mediante un **factor integrante**."))
+                steps.append(("latex",
+                    rf"y' + \underbrace{{{sp.latex(P)}}}_{{P(x)}}\,y = "
+                    rf"\underbrace{{{sp.latex(Q)}}}_{{Q(x)}}"))
+                steps.append(("md", "Se calcula el factor integrante:"))
+                intP = sp.integrate(P, x)
+                mu = sp.simplify(sp.exp(intP))
+                steps.append(("latex",
+                    rf"\mu(x) = e^{{\int P(x)\,dx}} = e^{{{sp.latex(intP)}}} = {sp.latex(mu)}"))
+                steps.append(("md",
+                    "Se multiplican ambos miembros de la ecuación por $\\mu(x)$: "
+                    "el lado izquierdo queda como la derivada de un producto, "
+                    "$(\\mu(x)\\,y)'$:"))
+                rhs = sp.simplify(mu * Q)
+                steps.append(("latex", rf"\big(\mu(x)\,y\big)' = \mu(x)\,Q(x) = {sp.latex(rhs)}"))
+                steps.append(("md", "Se integran ambos miembros respecto de $x$:"))
+                rhs_int = sp.integrate(rhs, x)
+                steps.append(("latex",
+                    rf"\mu(x)\,y = \int {sp.latex(rhs)}\,dx = {sp.latex(rhs_int)} + C"))
+                steps.append(("md", "Se despeja $y$:"))
+                y_gen = sp.simplify((rhs_int + C) / mu)
+                steps.append(("latex",
+                    rf"y(x) = \dfrac{{{sp.latex(rhs_int)} + C}}{{{sp.latex(mu)}}}"))
+                Csol = sp.solve(sp.Eq(y_gen.subs(x, x0_l), y0_l), C)
+                Cval = _real_const(Csol)
+                if Cval is not None:
+                    steps.append(("md",
+                        rf"Se aplica la condición inicial $y({_fmt(t0)})={_fmt(y0)}$ "
+                        rf"para hallar $C$:"))
+                    steps.append(("latex", rf"C = {sp.latex(Cval)}"))
+                    steps.append(("md", "**Solución particular:**"))
+                    steps.append(("latex",
+                        rf"y(x) = {sp.latex(sp.simplify(y_gen.subs(C, Cval)))}"))
+                    return steps
+            except Exception:
+                pass
+
+    # ── Fallback: tipo no reconocido por los 3 esquemas anteriores ──────────
+    steps = []
+    hint = _classify_hint_es(expr, x, y)
+    if hint:
+        steps.append(("md", rf"**Tipo de ecuación detectado por SymPy:** *{hint}*."))
+    steps.append(("md",
+        "Esta ecuación se resolvió con un método simbólico específico para "
+        "este tipo de EDO. La derivación detallada de este caso particular "
+        "no se descompone automáticamente paso a paso, pero la solución "
+        "obtenida fue **verificada numéricamente**: se comprobó que cumple "
+        "tanto la condición inicial como la propia ecuación diferencial "
+        "$y' = f(x,y)$ en varios puntos cercanos a $x_0$."))
+    steps.append(("md", "**Solución particular obtenida:**"))
+    steps.append(("latex", rf"y(x) = {sp.latex(sp.simplify(y_ex_expr))}"))
+    return steps
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Métodos numéricos  →  list[dict]
 # ─────────────────────────────────────────────────────────────────────────────
@@ -228,7 +437,7 @@ def _enrich(rows: list, y_exact_func) -> list:
             r["error"]  = abs(yr - r["y"])
         except Exception:
             r["y_real"] = None
-            r["error"]  = None
+            r["error"] = None
     return rows
 
 
@@ -606,8 +815,10 @@ por paso.
             "y_ex_func": y_ex_func,
             "y_ex_expr": y_ex_expr,
             "t0":        t0,
+            "y0":        y0,
             "t_end":     t_end_eff,
             "h":         h_val,
+            "f_expr":    f_expr,
         }
 
     # ── Guard: nada calculado aún ─────────────────────────────────────────────
@@ -628,6 +839,18 @@ por paso.
         st.success(
             rf"Solución exacta encontrada: $\quad y(x) = {sp.latex(res['y_ex_expr'])}$"
         )
+        with st.expander("🧮 Ver el paso a paso de cómo se llegó a esta solución", expanded=False):
+            try:
+                steps = _build_solution_steps(
+                    res["f_expr"], t0_r, res["y0"], res["y_ex_expr"]
+                )
+            except Exception as exc:
+                steps = [("md", f"No se pudo generar el detalle paso a paso ({exc}).")]
+            for kind, content in steps:
+                if kind == "latex":
+                    st.latex(content)
+                else:
+                    st.markdown(content)
     else:
         st.info(
             "No se encontró solución exacta analítica. "

@@ -171,6 +171,165 @@ def _num_latex(expr) -> str:
     return sp.latex(expr.evalf(10))
 
 
+def _classify_term(term, var):
+    """
+    Identifica que regla de integracion elemental corresponde a un termino
+    de la forma c * g(var) (donde c puede depender de otras variables, p.ej.
+    'y' al integrar en 'x' en una integral doble), y devuelve la antiderivada
+    de ese termino en particular junto con metadatos para mostrar el paso a
+    paso (nombre de la regla, formula general aplicada).
+
+    Si el termino no calza con ningun patron elemental reconocido, se hace
+    un fallback "generico": se integra igual con SymPy pero se etiqueta como
+    'tabla de integrales / SymPy' en vez de nombrar una regla puntual.
+    """
+    try:
+        c, g = term.as_independent(var, as_Add=False)  # term == c * g
+
+        # Termino constante respecto de 'var' (incluye el caso de una
+        # constante numerica pura, o una expresion que solo depende de
+        # otra variable, como 'y' al integrar en 'x').
+        if g == 1:
+            return {
+                "regla":   "Integral de una constante",
+                "formula": r"\int k \, d" + sp.latex(var) + r" = k \," + sp.latex(var),
+                "antider": term * var,
+            }
+
+        # Regla de la potencia: var**n  (n != -1)
+        if g.is_Pow and g.base == var and not g.exp.has(var):
+            n = g.exp
+            if sp.simplify(n + 1) == 0:
+                return {
+                    "regla":   "Integral de 1/" + sp.latex(var) + " (logaritmo natural)",
+                    "formula": r"\int \frac{1}{" + sp.latex(var) + r"}\, d" + sp.latex(var)
+                               + r" = \ln\left|" + sp.latex(var) + r"\right|",
+                    "antider": c * sp.log(sp.Abs(var)),
+                }
+            return {
+                "regla":   "Regla de la potencia",
+                "formula": r"\int " + sp.latex(var) + r"^n \, d" + sp.latex(var)
+                           + r" = \frac{" + sp.latex(var) + r"^{n+1}}{n+1} \quad (n \neq -1)",
+                "antider": c * var ** (n + 1) / (n + 1),
+            }
+
+        # var "a secas" (n = 1, sympy no lo deja como Pow)
+        if g == var:
+            return {
+                "regla":   "Regla de la potencia",
+                "formula": r"\int " + sp.latex(var) + r"\, d" + sp.latex(var)
+                           + r" = \frac{" + sp.latex(var) + r"^2}{2}",
+                "antider": c * var ** 2 / 2,
+            }
+
+        # Exponencial: e^(k*var)
+        if isinstance(g, sp.exp):
+            arg = g.args[0]
+            k = sp.diff(arg, var)
+            if not k.has(var):
+                if k == 1:
+                    return {
+                        "regla":   "Integral exponencial",
+                        "formula": r"\int e^{" + sp.latex(var) + r"}\, d" + sp.latex(var)
+                                   + r" = e^{" + sp.latex(var) + r"}",
+                        "antider": c * sp.exp(arg),
+                    }
+                return {
+                    "regla":   "Integral exponencial (regla de la cadena)",
+                    "formula": r"\int e^{k\," + sp.latex(var) + r"}\, d" + sp.latex(var)
+                               + r" = \frac{e^{k\," + sp.latex(var) + r"}}{k}",
+                    "antider": c * sp.exp(arg) / k,
+                }
+
+        # Exponencial de base distinta de e: a^var
+        if g.is_Pow and not g.base.has(var) and g.exp == var:
+            base = g.base
+            return {
+                "regla":   "Integral exponencial de base " + sp.latex(base),
+                "formula": r"\int a^{" + sp.latex(var) + r"}\, d" + sp.latex(var)
+                           + r" = \frac{a^{" + sp.latex(var) + r"}}{\ln a}",
+                "antider": c * g / sp.log(base),
+            }
+
+        # Seno: sin(k*var)
+        if isinstance(g, sp.sin):
+            arg = g.args[0]
+            k = sp.diff(arg, var)
+            if not k.has(var):
+                if k == 1:
+                    return {
+                        "regla":   "Integral de seno",
+                        "formula": r"\int \sin(" + sp.latex(var) + r")\, d" + sp.latex(var)
+                                   + r" = -\cos(" + sp.latex(var) + r")",
+                        "antider": -c * sp.cos(arg),
+                    }
+                return {
+                    "regla":   "Integral de seno (regla de la cadena)",
+                    "formula": r"\int \sin(k\," + sp.latex(var) + r")\, d" + sp.latex(var)
+                               + r" = -\frac{\cos(k\," + sp.latex(var) + r")}{k}",
+                    "antider": -c * sp.cos(arg) / k,
+                }
+
+        # Coseno: cos(k*var)
+        if isinstance(g, sp.cos):
+            arg = g.args[0]
+            k = sp.diff(arg, var)
+            if not k.has(var):
+                if k == 1:
+                    return {
+                        "regla":   "Integral de coseno",
+                        "formula": r"\int \cos(" + sp.latex(var) + r")\, d" + sp.latex(var)
+                                   + r" = \sin(" + sp.latex(var) + r")",
+                        "antider": c * sp.sin(arg),
+                    }
+                return {
+                    "regla":   "Integral de coseno (regla de la cadena)",
+                    "formula": r"\int \cos(k\," + sp.latex(var) + r")\, d" + sp.latex(var)
+                               + r" = \frac{\sin(k\," + sp.latex(var) + r")}{k}",
+                    "antider": c * sp.sin(arg) / k,
+                }
+
+        # Tangente: tan(var)
+        if isinstance(g, sp.tan) and g.args[0] == var:
+            return {
+                "regla":   "Integral de tangente",
+                "formula": r"\int \tan(" + sp.latex(var) + r")\, d" + sp.latex(var)
+                           + r" = -\ln\left|\cos(" + sp.latex(var) + r")\right|",
+                "antider": -c * sp.log(sp.Abs(sp.cos(var))),
+            }
+
+    except Exception:
+        pass
+
+    # ── Fallback generico: SymPy integra el termino completo y lo
+    #    etiquetamos como salido de tabla, sin nombrar una regla puntual.
+    F_generic = sp.integrate(term, var)
+    return {
+        "regla":   "Integral de tabla (resuelta con SymPy)",
+        "formula": None,
+        "antider": F_generic,
+    }
+
+
+def _term_steps(expr, var):
+    """
+    Descompone expr en terminos (suma) y devuelve la lista de pasos de
+    integracion termino a termino, usando _classify_term. Tambien indica
+    si hubo mas de un termino (para mostrar o no el paso de linealidad).
+    """
+    terms = sp.Add.make_args(sp.expand(expr))
+    steps = []
+    for term in terms:
+        info = _classify_term(term, var)
+        steps.append({
+            "term_latex":   sp.latex(term),
+            "regla":        info["regla"],
+            "formula":      info["formula"],
+            "antider_latex": sp.latex(info["antider"]),
+        })
+    return steps, len(terms) > 1
+
+
 def _solve_analytical_1d(func_str: str, a: float, b: float):
     """
     Resuelve la integral definida en forma cerrada.
@@ -247,12 +406,33 @@ def _solve_analytical_1d(func_str: str, a: float, b: float):
 
     ne_F = _has_nonelementary(F) if F is not None else False
 
+    # 4) Desglose termino a termino de la integral (linealidad + regla
+    #    aplicada a cada termino), solo para fines pedagogicos. Y los
+    #    pasos de sustitucion explicita de la Regla de Barrow.
+    term_steps = lineal = None
+    F_b_raw_latex = F_a_raw_latex = None
+    if show_steps:
+        try:
+            term_steps, lineal = _term_steps(expr, x)
+        except Exception:
+            term_steps, lineal = None, None
+        # Version "cruda" de F(b) y F(a): la sustitucion antes de
+        # simplificar/evaluar, para mostrar el paso intermedio.
+        F_b_raw = F.subs(x, b_sym, simultaneous=True)
+        F_a_raw = F.subs(x, a_sym, simultaneous=True)
+        F_b_raw_latex = _num_latex(F_b_raw) if _has_nonelementary(F_b_raw) else sp.latex(F_b_raw, mul_symbol="dot")
+        F_a_raw_latex = _num_latex(F_a_raw) if _has_nonelementary(F_a_raw) else sp.latex(F_a_raw, mul_symbol="dot")
+
     return {
         "expr":       sp.latex(expr),
         "show_steps": show_steps,
+        "term_steps": term_steps,
+        "lineal":     lineal,
         "F":          (_num_latex(F)   if ne_F else sp.latex(F))   if show_steps else None,
         "F_at_b":     (_num_latex(F_b) if ne_F else sp.latex(F_b)) if show_steps else None,
         "F_at_a":     (_num_latex(F_a) if ne_F else sp.latex(F_a)) if show_steps else None,
+        "F_b_raw":    F_b_raw_latex,
+        "F_a_raw":    F_a_raw_latex,
         "result_sym": _num_latex(result_sym) if ne_res else sp.latex(result_sym),
         "result_num": result_num,
         "a_sym":      sp.latex(a_sym),
@@ -306,16 +486,31 @@ def _solve_analytical_2d(func_str: str,
 
     ne_res     = _has_nonelementary(result_sym)
 
+    # Desglose pedagogico termino a termino de cada integral (interior en x,
+    # exterior en y).
+    try:
+        x_term_steps, x_lineal = _term_steps(expr, x)
+    except Exception:
+        x_term_steps, x_lineal = None, None
+    try:
+        y_term_steps, y_lineal = _term_steps(Fx_simplified, y)
+    except Exception:
+        y_term_steps, y_lineal = None, None
+
     return {
-        "expr":       sp.latex(expr),
-        "Fx":         _num_latex(Fx_simplified) if ne_x  else sp.latex(Fx_simplified),
-        "result_sym": _num_latex(result_sym)    if ne_res else sp.latex(result_sym),
-        "result_num": result_num,
-        "ax_s":       sp.latex(ax_s),
-        "bx_s":       sp.latex(bx_s),
-        "ay_s":       sp.latex(ay_s),
-        "by_s":       sp.latex(by_s),
-        "error":      None,
+        "expr":         sp.latex(expr),
+        "Fx":           _num_latex(Fx_simplified) if ne_x  else sp.latex(Fx_simplified),
+        "x_term_steps": x_term_steps,
+        "x_lineal":     x_lineal,
+        "y_term_steps": y_term_steps,
+        "y_lineal":     y_lineal,
+        "result_sym":   _num_latex(result_sym)    if ne_res else sp.latex(result_sym),
+        "result_num":   result_num,
+        "ax_s":         sp.latex(ax_s),
+        "bx_s":         sp.latex(bx_s),
+        "ay_s":         sp.latex(ay_s),
+        "by_s":         sp.latex(by_s),
+        "error":        None,
     }
 
 
@@ -799,32 +994,91 @@ def run():
         else:
             if dim == 1:
                 if sol["show_steps"]:
-                    # Paso 1: primitiva
-                    st.markdown("**Paso 1 — Primitiva indefinida**")
                     st.markdown(
-                        "Aplicamos el Teorema Fundamental del Cálculo: buscamos "
-                        r"$F(x)$ tal que $F'(x) = f(x)$."
-                    )
-                    st.latex(
-                        rf"\int {sol['expr']} \, dx = {sol['F']} + C"
+                        "Vamos a resolver la integral en dos grandes etapas: "
+                        "primero encontramos la **primitiva** $F(x)$ (Teorema "
+                        "Fundamental del Cálculo) y después aplicamos la "
+                        "**Regla de Barrow** para evaluarla en los límites."
                     )
 
-                    # Paso 2: Regla de Barrow
-                    st.markdown("**Paso 2 — Regla de Barrow**")
+                    # ── Paso 1: planteo + linealidad ────────────────────────
+                    st.markdown("**Paso 1 — Planteamos la integral indefinida**")
                     st.markdown(
-                        "Evaluamos la primitiva en los límites y restamos:"
+                        r"Buscamos $F(x)$ tal que $F'(x) = f(x)$, es decir:"
                     )
+                    st.latex(rf"\int {sol['expr']} \, dx")
+
+                    term_steps = sol["term_steps"] or []
+                    step_n = 2
+
+                    if sol["lineal"] and len(term_steps) > 1:
+                        st.markdown(f"**Paso {step_n} — Propiedad de linealidad**")
+                        st.markdown(
+                            "Como el integrando es una suma/resta de términos, "
+                            "separamos la integral en una integral por cada uno "
+                            "(la integral de una suma es la suma de las integrales):"
+                        )
+                        terms_sum_latex = " + ".join(
+                            rf"\int {t['term_latex']} \, dx" for t in term_steps
+                        )
+                        # Convertimos "+ -" en "- " para que se vea prolijo
+                        terms_sum_latex = terms_sum_latex.replace("+ -", "- ")
+                        st.latex(rf"\int {sol['expr']} \, dx = {terms_sum_latex}")
+                        step_n += 1
+
+                    # ── Paso(s): regla aplicada a cada término ──────────────
+                    if len(term_steps) > 1:
+                        st.markdown(f"**Paso {step_n} — Integramos cada término por separado**")
+                    else:
+                        st.markdown(f"**Paso {step_n} — Aplicamos la regla de integración correspondiente**")
+
+                    for i, t in enumerate(term_steps, start=1):
+                        label = f"{step_n}.{i}" if len(term_steps) > 1 else str(step_n)
+                        st.markdown(f"*Paso {label}: {t['regla']}*")
+                        if t["formula"]:
+                            st.latex(t["formula"])
+                        if len(term_steps) > 1:
+                            st.latex(
+                                rf"\int {t['term_latex']} \, dx = {t['antider_latex']}"
+                            )
+                        else:
+                            st.latex(
+                                rf"\int {sol['expr']} \, dx = {t['antider_latex']} + C"
+                            )
+                    step_n += 1
+
+                    # ── Paso: ensamblar F(x) ────────────────────────────────
+                    if len(term_steps) > 1:
+                        st.markdown(f"**Paso {step_n} — Sumamos los resultados para obtener** $F(x)$")
+                        st.markdown(
+                            "Juntamos la antiderivada de cada término (la constante "
+                            "de integración $C$ se agrega una sola vez al final):"
+                        )
+                        st.latex(rf"F(x) = {sol['F']} + C")
+                        step_n += 1
+
+                    # ── Paso: Regla de Barrow, sustitución explícita ────────
+                    st.markdown(f"**Paso {step_n} — Regla de Barrow: evaluamos** $F$ **en los límites**")
+                    st.markdown(
+                        r"El Teorema Fundamental del Cálculo dice que "
+                        r"$\int_a^b f(x)\,dx = F(b) - F(a)$. Evaluamos cada límite por separado."
+                    )
+                    st.markdown(f"*Sustituimos $x = {sol['b_sym']}$ en $F(x)$:*")
+                    st.latex(rf"F({sol['b_sym']}) = {sol['F_b_raw']}")
+                    st.markdown(f"*Sustituimos $x = {sol['a_sym']}$ en $F(x)$:*")
+                    st.latex(rf"F({sol['a_sym']}) = {sol['F_a_raw']}")
+                    step_n += 1
+
+                    st.markdown(f"**Paso {step_n} — Restamos**")
                     st.latex(
                         rf"\int_{{{sol['a_sym']}}}^{{{sol['b_sym']}}} {sol['expr']} \, dx"
                         rf"= F({sol['b_sym']}) - F({sol['a_sym']})"
+                        rf"= \left({sol['F_at_b']}\right) - \left({sol['F_at_a']}\right)"
                     )
-                    st.latex(
-                        rf"= \left({sol['F_at_b']}\right)"
-                        rf"- \left({sol['F_at_a']}\right)"
-                    )
+                    step_n += 1
 
-                    # Paso 3: resultado exacto
-                    st.markdown("**Paso 3 — Resultado exacto**")
+                    # ── Paso: resultado exacto ──────────────────────────────
+                    st.markdown(f"**Paso {step_n} — Simplificamos y obtenemos el resultado exacto**")
                     st.latex(
                         rf"I_{{exacta}} = {sol['result_sym']} = {sol['result_num']:.10f}"
                     )
@@ -849,28 +1103,108 @@ def run():
                     )
 
             else:
-                # Paso 1: integral interior
-                st.markdown("**Paso 1 — Integral interior en** $x$")
                 st.markdown(
-                    r"Tratamos $y$ como constante e integramos $f(x,y)$ respecto de $x$:"
+                    "Una integral doble se resuelve de **adentro hacia afuera**: "
+                    "primero integramos en $x$ (tratando $y$ como una constante) "
+                    "y, una vez obtenido ese resultado en función de $y$, lo "
+                    "integramos en $y$."
+                )
+
+                # ── Integral interior en x ──────────────────────────────────
+                st.markdown("**Paso 1 — Planteamos la integral interior en** $x$")
+                st.markdown(
+                    r"Tratamos $y$ como constante e integramos $f(x,y)$ respecto de $x$, "
+                    r"entre los límites del eje $x$:"
+                )
+                st.latex(
+                    rf"\int_{{{sol['ax_s']}}}^{{{sol['bx_s']}}} {sol['expr']} \, dx"
+                )
+
+                x_steps = sol["x_term_steps"] or []
+                step_n = 2
+
+                if sol["x_lineal"] and len(x_steps) > 1:
+                    st.markdown(f"**Paso {step_n} — Linealidad: separamos por términos**")
+                    terms_sum_latex = " + ".join(
+                        rf"\int_{{{sol['ax_s']}}}^{{{sol['bx_s']}}} {t['term_latex']} \, dx"
+                        for t in x_steps
+                    )
+                    terms_sum_latex = terms_sum_latex.replace("+ -", "- ")
+                    st.latex(
+                        rf"\int_{{{sol['ax_s']}}}^{{{sol['bx_s']}}} {sol['expr']} \, dx = {terms_sum_latex}"
+                    )
+                    step_n += 1
+
+                if len(x_steps) > 1:
+                    st.markdown(f"**Paso {step_n} — Integramos cada término en** $x$")
+                else:
+                    st.markdown(f"**Paso {step_n} — Aplicamos la regla de integración en** $x$")
+                for i, t in enumerate(x_steps, start=1):
+                    label = f"{step_n}.{i}" if len(x_steps) > 1 else str(step_n)
+                    st.markdown(f"*Paso {label}: {t['regla']}*")
+                    if t["formula"]:
+                        st.latex(t["formula"])
+                    st.latex(rf"\int {t['term_latex']} \, dx = {t['antider_latex']}")
+                step_n += 1
+
+                st.markdown(f"**Paso {step_n} — Evaluamos en los límites de** $x$ **(Barrow)**")
+                st.markdown(
+                    "Sumamos las antiderivadas de cada término, evaluamos en "
+                    rf"$x={sol['bx_s']}$ y en $x={sol['ax_s']}$, y restamos. "
+                    "El resultado es una función que ahora depende solo de $y$:"
                 )
                 st.latex(
                     rf"\int_{{{sol['ax_s']}}}^{{{sol['bx_s']}}} {sol['expr']} \, dx"
                     rf"= {sol['Fx']}"
                 )
+                step_n += 1
 
-                # Paso 2: integral exterior
-                st.markdown("**Paso 2 — Integral exterior en** $y$")
+                # ── Integral exterior en y ──────────────────────────────────
+                st.markdown(f"**Paso {step_n} — Planteamos la integral exterior en** $y$")
                 st.markdown(
-                    "Integramos el resultado anterior respecto de $y$:"
+                    "Tomamos el resultado anterior (ya sin $x$) y lo integramos "
+                    "respecto de $y$, entre los límites del eje $y$:"
                 )
+                st.latex(
+                    rf"\int_{{{sol['ay_s']}}}^{{{sol['by_s']}}} \left({sol['Fx']}\right) dy"
+                )
+                step_n += 1
+
+                y_steps = sol["y_term_steps"] or []
+
+                if sol["y_lineal"] and len(y_steps) > 1:
+                    st.markdown(f"**Paso {step_n} — Linealidad: separamos por términos**")
+                    terms_sum_latex = " + ".join(
+                        rf"\int_{{{sol['ay_s']}}}^{{{sol['by_s']}}} {t['term_latex']} \, dy"
+                        for t in y_steps
+                    )
+                    terms_sum_latex = terms_sum_latex.replace("+ -", "- ")
+                    st.latex(
+                        rf"\int_{{{sol['ay_s']}}}^{{{sol['by_s']}}} \left({sol['Fx']}\right) dy = {terms_sum_latex}"
+                    )
+                    step_n += 1
+
+                if len(y_steps) > 1:
+                    st.markdown(f"**Paso {step_n} — Integramos cada término en** $y$")
+                else:
+                    st.markdown(f"**Paso {step_n} — Aplicamos la regla de integración en** $y$")
+                for i, t in enumerate(y_steps, start=1):
+                    label = f"{step_n}.{i}" if len(y_steps) > 1 else str(step_n)
+                    st.markdown(f"*Paso {label}: {t['regla']}*")
+                    if t["formula"]:
+                        st.latex(t["formula"])
+                    st.latex(rf"\int {t['term_latex']} \, dy = {t['antider_latex']}")
+                step_n += 1
+
+                st.markdown(f"**Paso {step_n} — Evaluamos en los límites de** $y$ **(Barrow) y simplificamos**")
                 st.latex(
                     rf"\int_{{{sol['ay_s']}}}^{{{sol['by_s']}}} \left({sol['Fx']}\right) dy"
                     rf"= {sol['result_sym']}"
                 )
+                step_n += 1
 
-                # Paso 3: resultado exacto
-                st.markdown("**Paso 3 — Resultado exacto**")
+                # ── Resultado exacto ─────────────────────────────────────────
+                st.markdown(f"**Paso {step_n} — Resultado exacto**")
                 st.latex(
                     rf"I_{{exacta}} = {sol['result_sym']} = {sol['result_num']:.10f}"
                 )
