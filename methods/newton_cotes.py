@@ -326,7 +326,7 @@ def _show_max_error(method, deriv_expr, deriv_latex, a, b, h, d, a_str, b_str):
 
     # Tabla de candidatos (extremos + puntos críticos)
     rows = [
-        r"| Punto candidato | $|{}|$ |".format(cfg["dx_name"]),
+        r"| Punto candidato | $\lvert {} \rvert$ |".format(cfg["dx_name"]),
         "|:---:|:---:|",
     ]
     for xv, val in sorted(candidatos, key=lambda t: t[0]):
@@ -439,37 +439,62 @@ def _show_truncation_error(method, expr, x_sym, a, b, n, h, xi, xi_str, d, a_str
 # Error Real (vs. integral exacta)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _show_real_error(expr, x_sym, a, b, result, d, a_str, b_str):
+def _show_real_error(expr, x_sym, a, b, result, d, a_str, b_str, exact_override=None):
     """
     Calcula la integral exacta con SymPy y compara con el resultado numérico.
+
+    Si `exact_override` no es None, se usa ese valor directamente como
+    integral exacta (ingresado manualmente por el usuario) en lugar de
+    intentar resolverla simbólicamente con SymPy. Esto cubre los casos en
+    los que SymPy no logra hallar una forma cerrada.
     """
     al, bl = _val_latex(a_str), _val_latex(b_str)
 
     st.markdown("---")
     st.markdown("### 🎯 Error Real (vs. integral exacta)")
 
-    try:
-        with st.spinner("Calculando integral exacta con SymPy…"):
-            exact_sym = sp.integrate(expr, (x_sym, a, b))
-            exact_val = float(exact_sym.evalf(15))
-        if np.isnan(exact_val) or np.isinf(exact_val):
-            raise ValueError("La integral diverge o no es finita.")
-    except Exception as exc:
-        st.warning(f"⚠️ No se pudo obtener la integral exacta: {exc}")
-        return
+    exact_sym = None
+
+    if exact_override is not None:
+        exact_val = exact_override
+        st.info(
+            "ℹ️ Se está usando el **valor exacto ingresado manualmente** "
+            "(no se intentó resolver la integral con SymPy)."
+        )
+    else:
+        try:
+            with st.spinner("Calculando integral exacta con SymPy…"):
+                exact_sym = sp.integrate(expr, (x_sym, a, b))
+                exact_val = float(exact_sym.evalf(15))
+            if np.isnan(exact_val) or np.isinf(exact_val):
+                raise ValueError("La integral diverge o no es finita.")
+        except Exception as exc:
+            st.warning(f"⚠️ No se pudo obtener la integral exacta: {exc}")
+            st.info(
+                "💡 Si ya conocés el valor exacto de la integral, podés "
+                "ingresarlo en el campo **«Valor exacto de la integral»** "
+                "(antes del botón Calcular) y se usará en su lugar."
+            )
+            return
 
     abs_err = abs(result - exact_val)
     rel_err = abs_err / abs(exact_val) * 100 if abs(exact_val) > 1e-15 else float("inf")
     rel_str = f"{rel_err:.4f} %" if not np.isinf(rel_err) else "∞"
 
     # Mostrar integral exacta
-    try:
+    if exact_sym is not None:
+        try:
+            st.latex(
+                rf"\int_{{{al}}}^{{{bl}}} \left({sp.latex(expr)}\right) dx"
+                rf"= {sp.latex(exact_sym)} \approx {_fmt(exact_val, d)}"
+            )
+        except Exception:
+            st.latex(rf"\text{{Valor exacto}} \approx {_fmt(exact_val, d)}")
+    else:
         st.latex(
             rf"\int_{{{al}}}^{{{bl}}} \left({sp.latex(expr)}\right) dx"
-            rf"= {sp.latex(exact_sym)} \approx {_fmt(exact_val, d)}"
+            rf"= {_fmt(exact_val, d)} \quad \text{{(valor ingresado manualmente)}}"
         )
-    except Exception:
-        st.latex(rf"\text{{Valor exacto}} \approx {_fmt(exact_val, d)}")
 
     # Cards de error
     st.markdown(f"""
@@ -477,7 +502,7 @@ def _show_real_error(expr, x_sym, a, b, result, d, a_str, b_str):
         <div class="result-card" style="border-top: 3px solid #7c3aed;">
             <div class="rc-label">Valor exacto</div>
             <div class="rc-value">{exact_val:.{d}f}</div>
-            <div class="rc-sub">integral simbólica</div>
+            <div class="rc-sub">{"integral simbólica" if exact_sym is not None else "ingresado manualmente"}</div>
         </div>
         <div class="result-card" style="border-top: 3px solid #dc2626;">
             <div class="rc-label">Error absoluto</div>
@@ -696,6 +721,190 @@ def run():
     </style>
     """, unsafe_allow_html=True)
 
+    # ── Teoría (desplegable, arriba de todo) ───────────────────────────────────
+    with st.expander("📘 Teoría: ¿Qué son los métodos de Newton-Cotes?", expanded=False):
+        st.markdown(r"""
+### ¿Qué son?
+
+Los **métodos de Newton-Cotes** son una familia de técnicas para aproximar una
+integral definida
+
+$$
+\int_a^b f(x)\,dx
+$$
+
+cuando no se puede (o no conviene) resolver la integral de forma analítica.
+La idea común a todos ellos es:
+
+1. Dividir el intervalo $[a, b]$ en $n$ subintervalos iguales de ancho
+
+$$
+h = \frac{b-a}{n}
+$$
+
+2. **Reemplazar $f(x)$ por un polinomio** que pasa exactamente por los valores
+   de $f$ en los nodos $x_0, x_1, \dots, x_n$ (interpolación con nodos
+   equiespaciados).
+3. **Integrar ese polinomio en vez de $f(x)$**, porque integrar un polinomio
+   sí tiene una fórmula cerrada y exacta.
+
+Lo único que cambia de un método a otro es **el grado del polinomio
+interpolante** que se usa en cada tramo: a mayor grado, mayor precisión, pero
+también más restricciones sobre cómo se puede elegir $n$.
+""")
+
+        st.markdown("### Los 4 métodos implementados en esta calculadora")
+
+        st.markdown(r"""
+#### 1️⃣ Rectángulo Medio (polinomio de grado 0, regla **abierta**)
+
+Aproxima $f$ en cada subintervalo por una **constante**: el valor de $f$ en el
+punto medio. Geométricamente, el área bajo la curva se aproxima con
+rectángulos cuya altura es $f(\bar{x}_i)$, el punto medio de cada tramo.
+""")
+        st.latex(
+            r"\int_a^b f(x)\,dx \;\approx\; h \sum_{i=0}^{n-1} f(\bar{x}_i)"
+            r"\,,\qquad \bar{x}_i = a + \left(i+\tfrac12\right)h"
+        )
+        st.markdown(r"""
+**Paso a paso:**
+1. Calcular $h = (b-a)/n$.
+2. Para cada subintervalo $i = 0, \dots, n-1$, calcular el punto medio
+   $\bar{x}_i$ y evaluar $f(\bar{x}_i)$.
+3. Sumar todos los $f(\bar{x}_i)$ y multiplicar por $h$.
+
+**Restricciones:** ninguna sobre $n$ — funciona con cualquier entero $n \ge 1$.
+Se llama "abierta" porque nunca evalúa $f$ en los extremos $a$ y $b$, lo cual
+es útil si $f$ no está definida ahí.
+""")
+
+        st.markdown(r"""
+#### 2️⃣ Trapecios (polinomio de grado 1, regla **cerrada**)
+
+Aproxima $f$ en cada subintervalo por una **recta** que une $f(x_i)$ con
+$f(x_{i+1})$. El área bajo la curva se aproxima con trapecios.
+""")
+        st.latex(
+            r"\int_a^b f(x)\,dx \;\approx\; \frac{h}{2}"
+            r"\left[f(x_0) + 2\sum_{i=1}^{n-1} f(x_i) + f(x_n)\right]"
+        )
+        st.markdown(r"""
+**Paso a paso:**
+1. Calcular $h = (b-a)/n$.
+2. Evaluar $f$ en **todos** los nodos $x_0, x_1, \dots, x_n$ (incluyendo
+   ambos extremos).
+3. Sumar el doble de los nodos internos, más los dos extremos (sin
+   duplicar), y multiplicar por $h/2$.
+
+**Restricciones:** ninguna sobre $n$ — funciona con cualquier entero $n \ge 1$.
+""")
+
+        st.markdown(r"""
+#### 3️⃣ Simpson 1/3 (polinomio de grado 2, regla **cerrada**)
+
+Aproxima $f$ **de a pares de subintervalos** con una **parábola** que pasa
+por $f(x_{i-1})$, $f(x_i)$, $f(x_{i+1})$. Al usar una curva en vez de una
+recta, captura mejor la curvatura de $f$.
+""")
+        st.latex(
+            r"\int_a^b f(x)\,dx \;\approx\; \frac{h}{3}"
+            r"\left[f(x_0)+4f(x_1)+2f(x_2)+4f(x_3)+\cdots+4f(x_{n-1})+f(x_n)\right]"
+        )
+        st.markdown(r"""
+**Paso a paso:**
+1. Calcular $h = (b-a)/n$.
+2. Evaluar $f$ en todos los nodos $x_0, \dots, x_n$.
+3. Asignar coeficientes con el patrón **1 — 4 — 2 — 4 — 2 — ⋯ — 4 — 1**
+   (los nodos impares llevan 4, los pares internos llevan 2, los extremos
+   llevan 1).
+4. Sumar $c_i \cdot f(x_i)$ y multiplicar por $h/3$.
+
+**Restricciones:** requiere que **$n$ sea par**, porque el método agrupa los
+subintervalos de a pares (cada parábola necesita 2 subintervalos = 3 nodos).
+Con $n$ impar no se puede armar un número entero de parábolas.
+""")
+
+        st.markdown(r"""
+#### 4️⃣ Simpson 3/8 (polinomio de grado 3, regla **cerrada**)
+
+Aproxima $f$ **de a tríos de subintervalos** con un **polinomio cúbico** que
+pasa por 4 nodos consecutivos. Suele ser útil para combinarlo con Simpson 1/3
+cuando $n$ no es par, o cuando se busca un poco más de precisión local.
+""")
+        st.latex(
+            r"\int_a^b f(x)\,dx \;\approx\; \frac{3h}{8}"
+            r"\left[f(x_0)+3f(x_1)+3f(x_2)+2f(x_3)+\cdots+f(x_n)\right]"
+        )
+        st.markdown(r"""
+**Paso a paso:**
+1. Calcular $h = (b-a)/n$.
+2. Evaluar $f$ en todos los nodos $x_0, \dots, x_n$.
+3. Asignar coeficientes con el patrón **1 — 3 — 3 — 2 — 3 — 3 — 2 — ⋯ — 3 — 3 — 1**
+   (cada grupo de 3 subintervalos lleva 3, 3, 2, salvo el primer y el
+   último nodo que llevan 1).
+4. Sumar $c_i \cdot f(x_i)$ y multiplicar por $\frac{3h}{8}$.
+
+**Restricciones:** requiere que **$n$ sea múltiplo de 3**, porque cada tramo
+cúbico necesita 3 subintervalos = 4 nodos consecutivos.
+""")
+
+        st.markdown("### Similitudes y diferencias")
+        st.markdown(r"""
+| | Rectángulo Medio | Trapecios | Simpson 1/3 | Simpson 3/8 |
+|---|:---:|:---:|:---:|:---:|
+| Grado del polinomio usado | 0 (constante) | 1 (recta) | 2 (parábola) | 3 (cúbica) |
+| Tipo de regla | Abierta | Cerrada | Cerrada | Cerrada |
+| ¿Usa los extremos $a, b$? | No | Sí | Sí | Sí |
+| Orden del error global | $O(h^2)$ | $O(h^2)$ | $O(h^4)$ | $O(h^4)$ |
+| Exacto para polinomios de grado ≤ | 1 | 1 | 3 | 3 |
+| Restricción sobre $n$ | Ninguna | Ninguna | $n$ par | $n$ múltiplo de 3 |
+
+**Similitudes:** los cuatro dividen $[a,b]$ en subintervalos de igual ancho
+$h$, reemplazan $f$ por un polinomio en cada tramo, e integran ese polinomio
+de forma exacta. Todos mejoran su precisión a medida que $n$ crece (h más
+chico).
+
+**Diferencias clave:** el grado del polinomio interpolante determina tanto la
+**velocidad de convergencia** (Simpson converge mucho más rápido que
+Trapecios o Rectángulo Medio al aumentar $n$) como las **restricciones**
+sobre los valores válidos de $n$.
+""")
+
+        st.markdown("### Error de truncamiento y cota de error global")
+        st.markdown(r"""
+Cada método tiene un **error de truncamiento** asociado, que mide qué tan
+lejos está la aproximación del valor exacto debido a reemplazar $f$ por un
+polinomio. La fórmula general usa un punto $\xi \in (a, b)$ que existe por el
+**Teorema del Valor Medio**, pero como no se conoce $\xi$ exactamente, se
+suele acotar el error usando el **máximo** de la derivada correspondiente en
+todo el intervalo (esto es lo que hace la sección "Error Máximo Posible" más
+abajo, sin necesidad de que el usuario indique $\xi$).
+""")
+        st.latex(r"E_M \approx \frac{(b-a)\,h^2}{24}\,f''(\xi) \qquad \text{(Rectángulo Medio)}")
+        st.latex(r"E_T \approx -\frac{(b-a)\,h^2}{12}\,f''(\xi) \qquad \text{(Trapecios)}")
+        st.latex(r"E_{S_{1/3}} \approx -\frac{(b-a)\,h^4}{180}\,f^{(4)}(\xi) \qquad \text{(Simpson 1/3)}")
+        st.latex(r"E_{S_{3/8}} \approx -\frac{(b-a)\,h^4}{80}\,f^{(4)}(\xi) \qquad \text{(Simpson 3/8)}")
+        st.markdown(r"""
+**Cómo se usa la cota de error máximo (sin conocer $\xi$):**
+$$
+|E| \;\le\; |\text{coeficiente}| \cdot \max_{x \,\in\, [a,b]} \left| f^{(k)}(x) \right|
+$$
+donde $k=2$ para Rectángulo Medio y Trapecios, y $k=4$ para ambos Simpson.
+El máximo de $|f^{(k)}(x)|$ se calcula evaluando la derivada en los extremos
+del intervalo y en sus puntos críticos (donde la siguiente derivada se anula),
+y tomando el mayor valor absoluto entre todos esos candidatos — esto da el
+**peor caso posible** del error, garantizando que el error real nunca lo
+supera.
+
+Nótese que Rectángulo Medio y Trapecios comparten el mismo orden de
+convergencia $O(h^2)$ porque ambos usan polinomios de grado 1 o menor
+(la constante del rectángulo medio es, sorprendentemente, tan precisa como
+la recta del trapecio — y de signo opuesto, lo cual se aprovecha en métodos
+combinados). Simpson 1/3 y Simpson 3/8 comparten el orden $O(h^4)$ porque
+ambos son exactos para polinomios cúbicos, aunque sus constantes de error
+son distintas ($1/180$ vs $1/80$).
+""")
+
     st.title("Integración Numérica — Newton-Cotes")
 
     # ── Selector de método ────────────────────────────────────────────────────
@@ -776,6 +985,27 @@ def run():
             xi = _parse_val(xi_str)
         except Exception:
             st.error("Valor de ξ inválido. Usá números o expresiones como pi/4, 0.5, e.")
+
+    # ── Valor exacto de la integral (opcional, override manual) ──────────────
+    exact_str = st.text_input(
+        "Valor exacto de la integral — opcional",
+        value="",
+        placeholder="Ej: 1.45469  |  pi/4  |  2*e - 1",
+        help=(
+            "Por defecto el script intenta resolver la integral exacta con "
+            "SymPy para calcular el Error Real. Si SymPy no logra hallarla "
+            "(o tarda demasiado / no converge a una forma cerrada), podés "
+            "ingresar acá el valor que ya calculaste por otro medio y se "
+            "usará directamente en su lugar, sin que el script intente "
+            "resolverla de nuevo."
+        ),
+    )
+    exact_override = None
+    if exact_str.strip():
+        try:
+            exact_override = _parse_val(exact_str)
+        except Exception:
+            st.error("Valor exacto inválido. Usá números o expresiones como pi/4, 2*e, sqrt(2).")
 
     # ── Preview de h ──────────────────────────────────────────────────────────
     if a is not None and b is not None and n is not None:
@@ -861,7 +1091,9 @@ def run():
         _show_truncation_error(
             method, f.expr, f.x_sym, a, b, n, h, xi, xi_str, d, a_str, b_str
         )
-        _show_real_error(f.expr, f.x_sym, a, b, result, d, a_str, b_str)
+        _show_real_error(
+            f.expr, f.x_sym, a, b, result, d, a_str, b_str, exact_override
+        )
 
 
 if __name__ == "__main__":
