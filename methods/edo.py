@@ -49,28 +49,121 @@ def _fmt(v, prec: int = 8) -> str:
         return str(v)
 
 
+def _safe_real(v, tol: float = 1e-6):
+    """Convierte v a float si es (esencialmente) real; si no, devuelve None."""
+    try:
+        c = complex(v)
+    except Exception:
+        return None
+    if not (math.isfinite(c.real) and math.isfinite(c.imag)):
+        return None
+    if abs(c.imag) > tol * max(1.0, abs(c.real)):
+        return None
+    return c.real
+
+
 def _solve_exact(expr, t0: float, y0: float):
     """
     Intenta resolver y' = expr con y(x0) = y0 de forma simbólica.
     Devuelve (callable, rhs_expr) o (None, None).
+
+    Estrategia en dos pasos:
+      1) Camino rápido: dsolve con ics directamente (funciona en la mayoría
+         de los casos lineales / estándar).
+      2) Si falla (p.ej. porque la condición inicial produce varias
+         soluciones posibles para la constante, algo común con raíces o
+         potencias pares), se obtiene la solución general, se despeja la
+         constante de integración a mano, y cada candidata se valida
+         numéricamente comprobando que su derivada coincide con f(x,y)
+         cerca de x0 — esto descarta ramas espurias (p.ej. de sqrt) y
+         se queda con la solución correcta.
     """
     x, y, _ = _local_dict()
     yf = sp.Function("y")
+    x0_s = sp.nsimplify(t0, rational=True)
+    y0_s = sp.nsimplify(y0, rational=True)
+    ode_eq = sp.Eq(yf(x).diff(x), expr.subs(y, yf(x)))
+
+    candidates = []
+
+    # ── Paso 1: camino rápido ────────────────────────────────────────────
     try:
-        x0_s = sp.nsimplify(t0, rational=True)
-        y0_s = sp.nsimplify(y0, rational=True)
-        ode_eq = sp.Eq(yf(x).diff(x), expr.subs(y, yf(x)))
-        sol    = sp.dsolve(ode_eq, yf(x), ics={yf(x0_s): y0_s})
-        if isinstance(sol, list):
-            sol = sol[0]
-        rhs  = sol.rhs
-        func = sp.lambdify(x, rhs, modules=["numpy"])
-        # sanity check: evaluable y finita en x0
-        if not math.isfinite(float(func(float(t0)))):
-            raise ValueError("Valor no finito en x0.")
-        return func, rhs
+        sol = sp.dsolve(ode_eq, yf(x), ics={yf(x0_s): y0_s})
+        sols = sol if isinstance(sol, list) else [sol]
+        candidates.extend(s.rhs for s in sols if s.lhs == yf(x))
     except Exception:
+        pass
+
+    # ── Paso 2: solución general + despeje manual de la constante ───────
+    if not candidates:
+        try:
+            gen = sp.dsolve(ode_eq, yf(x))
+            gens = gen if isinstance(gen, list) else [gen]
+            for g in gens:
+                explicit_list = [g.rhs] if g.lhs == yf(x) else []
+                if not explicit_list:
+                    try:
+                        explicit_list = list(sp.solve(g, yf(x)))
+                    except Exception:
+                        continue
+                for rhs in explicit_list:
+                    consts = sorted(rhs.free_symbols - {x}, key=str)
+                    if len(consts) != 1:
+                        continue  # solo manejamos 1 constante (EDO de 1er orden)
+                    c = consts[0]
+                    try:
+                        csols = sp.solve(sp.Eq(rhs.subs(x, x0_s), y0_s), c)
+                    except Exception:
+                        continue
+                    for cs in csols:
+                        if cs.is_real is False:
+                            continue
+                        candidates.append(rhs.subs(c, cs))
+        except Exception:
+            pass
+
+    if not candidates:
         return None, None
+
+    # ── Validación numérica: y(x0)=y0 y además y'(x) ≈ f(x, y(x)) ───────
+    f_num = sp.lambdify((x, y), expr, modules=["numpy"])
+    t0f, y0f = float(t0), float(y0)
+    test_xs = [t0f + dx for dx in (1e-3, 1e-2, 5e-2, 0.1)]
+    hfd = 1e-6
+
+    for cand in candidates:
+        try:
+            cand_s = sp.simplify(cand)
+            func = sp.lambdify(x, cand_s, modules=["numpy"])
+
+            y0_check = _safe_real(func(t0f))
+            if y0_check is None or abs(y0_check - y0f) > 1e-6 * max(1, abs(y0f)):
+                continue
+
+            ok = True
+            for tx in test_xs:
+                yv = _safe_real(func(tx))
+                if yv is None:
+                    ok = False
+                    break
+                y_fwd = _safe_real(func(tx + hfd))
+                y_bwd = _safe_real(func(tx - hfd))
+                if y_fwd is None or y_bwd is None:
+                    ok = False
+                    break
+                dyv  = (y_fwd - y_bwd) / (2 * hfd)
+                fval = _safe_real(f_num(tx, yv))
+                if fval is None:
+                    continue
+                if abs(dyv - fval) > 1e-3 * max(1, abs(fval)):
+                    ok = False
+                    break
+            if ok:
+                return func, cand_s
+        except Exception:
+            continue
+
+    return None, None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
