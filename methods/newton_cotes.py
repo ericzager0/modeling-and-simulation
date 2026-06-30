@@ -1,6 +1,7 @@
 import streamlit as st
 import sympy as sp
 import numpy as np
+import plotly.graph_objects as go
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -21,16 +22,111 @@ def _parse(func_str: str):
     return f, sp.latex(expr), expr, x
 
 
+def _classify_indeterminate(expr, x_sym, x_val):
+    """
+    Intenta identificar el TIPO de forma indeterminada (0/0, ∞/∞, 0·∞, ∞−∞,
+    0^0, 1^∞, ∞^0) que se produce al evaluar `expr` en x = x_val.
+
+    Lo hace inspeccionando la estructura algebraica de la expresión
+    (numerador/denominador, potencias, productos, sumas) y calculando el
+    LÍMITE de cada parte involucrada para ver si tiende a 0, a ∞ o a 1.
+
+    Devuelve un string identificador de la forma ("0/0", "∞/∞", "0·∞",
+    "∞-∞", "0^0", "1^∞", "∞^0") o None si no se pudo clasificar.
+    """
+    def _kind(sub):
+        """Clasifica el límite de una subexpresión en x_val."""
+        try:
+            lim = sp.limit(sub, x_sym, x_val)
+            if lim in (sp.oo, -sp.oo, sp.zoo):
+                return "inf"
+            lim_c = complex(lim.evalf())
+            if abs(lim_c.imag) > 1e-9:
+                return None
+            r = lim_c.real
+            if abs(r) < 1e-9:
+                return "zero"
+            if abs(r - 1) < 1e-9:
+                return "one"
+            return "finite"
+        except Exception:
+            return None
+
+    # — 0/0 y ∞/∞: separar numerador y denominador de la expresión completa
+    try:
+        num, den = sp.fraction(sp.together(expr))
+        if den != 1:
+            kn, kd = _kind(num), _kind(den)
+            if kn == "zero" and kd == "zero":
+                return "0/0"
+            if kn == "inf" and kd == "inf":
+                return "∞/∞"
+    except Exception:
+        pass
+
+    # — 0^0, 1^∞, ∞^0: cualquier potencia cuya base Y exponente dependan de x
+    for node in expr.atoms(sp.Pow):
+        if not (node.base.has(x_sym) and node.exp.has(x_sym)):
+            continue
+        kb, ke = _kind(node.base), _kind(node.exp)
+        if kb == "zero" and ke == "zero":
+            return "0^0"
+        if kb == "one" and ke == "inf":
+            return "1^∞"
+        if kb == "inf" and ke == "zero":
+            return "∞^0"
+
+    # — 0·∞: producto con un factor que tiende a 0 y otro que tiende a ∞
+    if isinstance(expr, sp.Mul):
+        kinds = [_kind(a) for a in expr.args]
+        if "zero" in kinds and "inf" in kinds:
+            return "0·∞"
+
+    # — ∞ − ∞: suma con (al menos) dos términos cuyo límite es infinito
+    if isinstance(expr, sp.Add):
+        inf_terms = [a for a in expr.args if _kind(a) == "inf"]
+        if len(inf_terms) >= 2:
+            return "∞-∞"
+
+    return None
+
+
 class _SafeFunc:
     """
-    Wrapper que usa sp.limit() (L'Hôpital) cuando f(x) produce NaN o ∞.
-    Registra los nodos afectados en lhopital_points.
+    Wrapper que detecta formas indeterminadas (0/0, ∞/∞, 0·∞, ∞−∞, 0^0,
+    1^∞, ∞^0, …) al evaluar f(x) y las resuelve calculando el LÍMITE
+    SIMBÓLICO con SymPy (que internamente puede usar la Regla de L'Hôpital,
+    desarrollo en series, o simplificación algebraica, según el caso).
+
+    Hay dos vías de detección:
+      1. La evaluación numérica directa da NaN o ±Inf (cubre 0/0, ∞/∞,
+         0·∞, ∞−∞, etc.).
+      2. La evaluación numérica da un resultado "válido" pero engañoso,
+         como 0.0 ** 0.0 == 1.0 en Python/NumPy: matemáticamente 0^0 es
+         indeterminado, pero el float no lo refleja. Para esto se inspecciona
+         la estructura simbólica de la expresión (potencias con base Y
+         exponente dependientes de x) y se chequea explícitamente.
+
+    Registra los nodos afectados en `lhopital_points` como tuplas
+    (x_val, valor_resuelto, tipo_de_indeterminación).
     """
     def __init__(self, f_callable, expr, x_sym):
-        self._f            = f_callable
-        self.expr          = expr      # acceso público para las secciones de error
-        self.x_sym         = x_sym
+        self._f     = f_callable
+        self.expr   = expr      # acceso público para las secciones de error
+        self.x_sym  = x_sym
         self.lhopital_points: list = []
+        # Nodos Pow donde tanto la base como el exponente dependen de x:
+        # candidatos a 0^0 / 1^∞ / ∞^0 — formas que Python/NumPy a veces
+        # "resuelven" en silencio (p. ej. 0.0 ** 0.0 == 1.0) sin avisar
+        # que matemáticamente son indeterminadas.
+        self._pow_nodes = [
+            n for n in expr.atoms(sp.Pow)
+            if n.base.has(x_sym) and n.exp.has(x_sym)
+        ]
+
+    def _register(self, x_val, lim_val, forma):
+        if not any(abs(p[0] - x_val) < 1e-14 for p in self.lhopital_points):
+            self.lhopital_points.append((float(x_val), lim_val, forma))
 
     def __call__(self, x_val: float) -> float:
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -39,15 +135,33 @@ class _SafeFunc:
             except Exception:
                 val = float("nan")
 
+        # ── Caso 1: NaN o ±Inf directo (0/0, ∞/∞, 0·∞, ∞−∞, …) ──────────────
         if np.isnan(val) or np.isinf(val):
+            forma = _classify_indeterminate(self.expr, self.x_sym, x_val)
             try:
                 lim_val = float(sp.limit(self.expr, self.x_sym, x_val))
                 if not (np.isnan(lim_val) or np.isinf(lim_val)):
-                    if not any(abs(p[0] - x_val) < 1e-14 for p in self.lhopital_points):
-                        self.lhopital_points.append((float(x_val), lim_val))
+                    self._register(x_val, lim_val, forma)
                     return lim_val
             except Exception:
                 pass
+            return val
+
+        # ── Caso 2: 0^0 "silencioso" (no da NaN, pero es indeterminado) ────
+        for node in self._pow_nodes:
+            try:
+                base_val = float(node.base.subs(self.x_sym, x_val).evalf())
+                exp_val  = float(node.exp.subs(self.x_sym, x_val).evalf())
+            except Exception:
+                continue
+            if abs(base_val) < 1e-9 and abs(exp_val) < 1e-9:
+                try:
+                    lim_val = float(sp.limit(self.expr, self.x_sym, x_val))
+                    if not (np.isnan(lim_val) or np.isinf(lim_val)):
+                        self._register(x_val, lim_val, "0^0")
+                        return lim_val
+                except Exception:
+                    pass
         return val
 
 
@@ -186,18 +300,159 @@ def _weighted_sum_display(coeffs, fxs, d):
     return W
 
 
-def _show_lhopital_warning(f: _SafeFunc, d: int):
+# ─────────────────────────────────────────────────────────────────────────────
+# Gráfico de aproximación por método
+# ─────────────────────────────────────────────────────────────────────────────
+
+_METHOD_COLOR = {
+    "Rectángulo Medio": "#2563eb",
+    "Trapecios":         "#16a34a",
+    "Simpson 1/3":       "#d97706",
+    "Simpson 3/8":       "#7c3aed",
+}
+
+
+def _hex_to_rgba(hex_color: str, alpha: float = 0.18) -> str:
+    hex_color = hex_color.lstrip("#")
+    r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def _curve_xy(f, a, b, margin: float = 0.06, num: int = 400):
+    """Curva real de f(x) (la función original, sin pasar por el wrapper de
+    indeterminaciones nodo a nodo) para usar de referencia visual."""
+    span = (b - a) if b > a else 1.0
+    lo, hi = a - margin * span, b + margin * span
+    xc = np.linspace(lo, hi, num)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        try:
+            yc = np.array([float(f._f(v)) for v in xc])
+        except Exception:
+            yc = np.full_like(xc, np.nan)
+    yc = np.where(np.isfinite(yc), yc, np.nan)
+    return xc, yc
+
+
+def _plot_method(method, f, a, b, n, h, xs, fxs=None, xmids=None, fmids=None):
+    """
+    Gráfico clásico de cada método de Newton-Cotes: la curva real de f(x)
+    de fondo, y superpuesta la figura geométrica que el método usa para
+    aproximar el área (rectángulos, trapecios, parábolas o cúbicas).
+    """
+    color = _METHOD_COLOR[method]
+    fig = go.Figure()
+
+    # — Forma geométrica de aproximación ────────────────────────────────────
+    xr, yr = [], []
+
+    if method == "Rectángulo Medio":
+        for i in range(n):
+            x0, x1 = xs[i], xs[i] + h
+            hgt = fmids[i]
+            xr += [x0, x0, x1, x1, x0, None]
+            yr += [0, hgt, hgt, 0, 0, None]
+        shape_name = "Rectángulos (altura = f en el punto medio)"
+
+    elif method == "Trapecios":
+        for i in range(n):
+            x0, x1 = xs[i], xs[i + 1]
+            y0, y1 = fxs[i], fxs[i + 1]
+            xr += [x0, x0, x1, x1, x0, None]
+            yr += [0, y0, y1, 0, 0, None]
+        shape_name = "Trapecios"
+
+    elif method == "Simpson 1/3":
+        for i in range(0, n, 2):
+            xx, yy = xs[i:i + 3], fxs[i:i + 3]
+            c  = np.polyfit(xx, yy, 2)
+            xf = np.linspace(xx[0], xx[-1], 30)
+            yf = np.polyval(c, xf)
+            xr += list(xf) + [xf[-1], xf[0], None]
+            yr += list(yf) + [0, 0, None]
+        shape_name = "Parábolas interpolantes (cada 2 subintervalos)"
+
+    else:  # Simpson 3/8
+        for i in range(0, n, 3):
+            xx, yy = xs[i:i + 4], fxs[i:i + 4]
+            c  = np.polyfit(xx, yy, 3)
+            xf = np.linspace(xx[0], xx[-1], 30)
+            yf = np.polyval(c, xf)
+            xr += list(xf) + [xf[-1], xf[0], None]
+            yr += list(yf) + [0, 0, None]
+        shape_name = "Cúbicas interpolantes (cada 3 subintervalos)"
+
+    fig.add_trace(go.Scatter(
+        x=xr, y=yr, mode="lines", fill="toself",
+        line=dict(color=color, width=1),
+        fillcolor=_hex_to_rgba(color, 0.20),
+        name=shape_name, hoverinfo="skip",
+    ))
+
+    # — Nodos usados por el método ───────────────────────────────────────────
+    if method == "Rectángulo Medio":
+        fig.add_trace(go.Scatter(
+            x=xmids, y=fmids, mode="markers",
+            marker=dict(color=color, size=8, line=dict(color="white", width=1)),
+            name="Puntos medios x̄ᵢ",
+            hovertemplate="x̄ = %{x:.4f}<br>f(x̄) = %{y:.4f}<extra></extra>",
+        ))
+    else:
+        fig.add_trace(go.Scatter(
+            x=xs, y=fxs, mode="markers",
+            marker=dict(color=color, size=8, line=dict(color="white", width=1)),
+            name="Nodos xᵢ",
+            hovertemplate="x = %{x:.4f}<br>f(x) = %{y:.4f}<extra></extra>",
+        ))
+
+    # — Curva real de f(x), de referencia ────────────────────────────────────
+    xc, yc = _curve_xy(f, a, b)
+    fig.add_trace(go.Scatter(
+        x=xc, y=yc, mode="lines",
+        line=dict(color="#111827", width=2.2),
+        name="f(x)",
+    ))
+
+    fig.add_hline(y=0, line=dict(color="rgba(0,0,0,0.25)", width=1))
+
+    fig.update_layout(
+        title=f"Aproximación gráfica — {method}",
+        xaxis_title="x", yaxis_title="f(x)",
+        template="plotly_white",
+        height=440,
+        margin=dict(l=10, r=10, t=50, b=10),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        hovermode="closest",
+    )
+    return fig
+
+
+_FORM_LABEL = {
+    "0/0":  "0 / 0",
+    "∞/∞":  "∞ / ∞",
+    "0·∞":  "0 · ∞",
+    "∞-∞":  "∞ − ∞",
+    "0^0":  "0⁰",
+    "1^∞":  "1^∞",
+    "∞^0":  "∞⁰",
+}
+
+
+def _show_lhopital_warning(f: "_SafeFunc", d: int):
     if not f.lhopital_points:
         return
     filas = "\n".join(
-        f"| ${_fmt(xv, d)}$ | NaN (0/0 ó ∞/∞) | ${_fmt(lv, d)}$ |"
-        for xv, lv in f.lhopital_points
+        f"| ${_fmt(xv, d)}$ | **{_FORM_LABEL.get(forma, 'indeterminada')}** | ${_fmt(lv, d)}$ |"
+        for xv, lv, forma in f.lhopital_points
     )
     st.info(
-        "**📐 Regla de L'Hôpital aplicada automáticamente**\n\n"
-        "La función presentó una indeterminación (0/0 ó ∞/∞) en uno o más nodos "
-        "de la malla. Se calculó el **límite simbólico** con SymPy:\n\n"
-        "| Nodo $x$ | Evaluación directa | Límite (L'Hôpital) |\n"
+        "**⚠️ Indeterminación detectada y resuelta automáticamente**\n\n"
+        "Al evaluar $f(x)$ en uno o más nodos de la malla se produjo una "
+        "**forma indeterminada**. El programa la identificó y calculó el "
+        "**límite simbólico** con SymPy en ese punto (internamente puede "
+        "recurrir a la Regla de L'Hôpital, desarrollo en series, o "
+        "simplificación algebraica, según corresponda) para reemplazar el "
+        "valor no definido por el límite real de la función:\n\n"
+        "| Nodo $x$ | Tipo de indeterminación | Valor resuelto (límite) |\n"
         "|:---:|:---:|:---:|\n"
         + filas
     )
@@ -724,6 +979,99 @@ def run():
     # ── Teoría (desplegable, arriba de todo) ───────────────────────────────────
     with st.expander("📘 Teoría: ¿Qué son los métodos de Newton-Cotes?", expanded=False):
         st.markdown(r"""
+### ⏱️ Velocidad de convergencia — cómo compararla entre métodos
+
+Si te pidieron "comparar la velocidad de convergencia" entre estos métodos,
+es un pedido perfectamente válido — pero **no se responde corriendo cada
+método una sola vez con un único $n$**. Con un solo $n$ obtenés un solo
+número de error por método: eso te dice cuál es más preciso *en ese punto*,
+pero no dice nada sobre la *velocidad* a la que cada uno mejora a medida que
+refinás la malla.
+
+**¿A qué convergen?** Los cuatro métodos convergen al mismo lugar: el
+**valor exacto** de la integral, $\int_a^b f(x)\,dx$, a medida que
+$n \to \infty$ (equivalentemente, $h \to 0$). La diferencia entre ellos no
+es el destino, sino qué tan rápido llegan ahí.
+""")
+        st.markdown("**La velocidad está dada por el orden del error de truncamiento:**")
+        st.markdown(r"""
+| Método | Orden del error |
+|---|:---:|
+| Rectángulo Medio | $O(h^2)$ |
+| Trapecios | $O(h^2)$ |
+| Simpson 1/3 | $O(h^4)$ |
+| Simpson 3/8 | $O(h^4)$ |
+""")
+        st.markdown(r"""
+Esto sale directamente de las fórmulas de error de truncamiento (ver más
+abajo): el error se comporta como $E(h) \approx C \cdot h^p$, donde $p$ es
+el orden (2 o 4) y $C$ es una constante que depende de la derivada de
+$f$ pero **no** de $h$. Como $p$ entra como exponente, duplicar $n$ (o sea,
+partir $h$ a la mitad) no reduce el error a la mitad — lo reduce mucho más:
+""")
+        st.latex(r"\frac{E(h)}{E(h/2)} \;\approx\; \frac{C\,h^p}{C\,(h/2)^p} \;=\; 2^p")
+        st.markdown(r"""
+- Para Punto Medio / Trapecios ($p=2$): cada vez que duplicás $n$, el error
+  se divide por $2^2 = 4$.
+- Para Simpson 1/3 / 3/8 ($p=4$): cada vez que duplicás $n$, el error se
+  divide por $2^4 = 16$.
+
+Esa razón constante ($\approx 4$ o $\approx 16$) es, en la práctica, la
+**prueba empírica** de la velocidad de convergencia — y es exactamente lo
+que tu profesor espera que muestres.
+""")
+        st.markdown("### Paso a paso para justificarlo con tu integral")
+        st.markdown(r"""
+1. **Elegí varios valores de $n$ crecientes**, idealmente duplicando cada
+   vez: por ejemplo $n = 2, 4, 8, 16, 32$ (ajustando a las restricciones de
+   cada método: par para Simpson 1/3, múltiplo de 3 para Simpson 3/8).
+2. **Para cada $n$**, corré el método acá arriba y anotá:
+   - el resultado numérico (tarjeta "Integral aproximada"),
+   - el error absoluto contra el valor exacto (sección **🎯 Error Real**,
+     que esta calculadora resuelve sola con SymPy, o con el valor exacto
+     que vos ingreses si SymPy no puede).
+3. **Armá una tabla** con $n$, $h$, y el error de cada método.
+4. **Calculá la razón entre errores consecutivos**:
+""")
+        st.latex(r"\text{razón} = \frac{E(n)}{E(2n)}")
+        st.markdown(r"""
+5. **Verificá que esa razón se estabiliza** cerca de $4$ (Punto Medio /
+   Trapecios) o cerca de $16$ (Simpson 1/3 / 3/8). Si querés el exponente
+   exacto en vez de la razón, podés despejarlo:
+""")
+        st.latex(r"p \approx \log_2\!\left(\frac{E(n)}{E(2n)}\right)")
+        st.markdown(r"""
+Así obtenés un número ($p \approx 2$ o $p \approx 4$) que confirma el orden
+de cada método con tus propios datos, no solo de memoria.
+
+**Ejemplo ilustrativo** (números inventados solo para mostrar el patrón que
+tenés que buscar — no son de ninguna integral real):
+""")
+        st.markdown(r"""
+| $n$ | $h$ | Error Trapecios | Razón | Error Simpson 1/3 | Razón |
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| 2  | 1.000 | 0.600000  | —    | 0.080000  | —     |
+| 4  | 0.500 | 0.150000  | 4.00 | 0.005000  | 16.00 |
+| 8  | 0.250 | 0.037500  | 4.00 | 0.000313  | 16.00 |
+| 16 | 0.125 | 0.009375  | 4.00 | 0.0000195 | 16.00 |
+""")
+        st.markdown(r"""
+Notá que la razón de Trapecios se mantiene en $4$ en toda la tabla (orden
+$2$), mientras que la de Simpson 1/3 se mantiene en $16$ (orden $4$) — y
+esa es la "velocidad de convergencia" distinta que tu profesor te pidió
+comparar. Con tu función real los números no van a salir tan redondos
+(porque $C$ no es constante en todo punto, y para $n$ chico todavía pesan
+términos de orden superior), pero la razón debería **acercarse** a esos
+valores a medida que $n$ crece.
+
+**En resumen:** tu profesor no se equivocó — solo falta el paso de variar
+$n$ varias veces en lugar de una. Con un único $n$ fijo no hay "velocidad"
+que comparar, porque la velocidad es, por definición, una tasa de cambio:
+cómo se achica el error a medida que ese $n$ crece.
+""")
+
+        st.markdown("---")
+        st.markdown(r"""
 ### ¿Qué son?
 
 Los **métodos de Newton-Cotes** son una familia de técnicas para aproximar una
@@ -905,6 +1253,38 @@ ambos son exactos para polinomios cúbicos, aunque sus constantes de error
 son distintas ($1/180$ vs $1/80$).
 """)
 
+        st.markdown("### ⚠️ Formas indeterminadas")
+        st.markdown(r"""
+Al evaluar $f(x)$ en algún nodo de la malla puede ocurrir que la expresión
+tome una **forma indeterminada**, como:
+
+$$
+\frac{0}{0}, \qquad \frac{\infty}{\infty}, \qquad 0\cdot\infty,
+\qquad \infty-\infty, \qquad 0^0, \qquad 1^\infty, \qquad \infty^0
+$$
+
+Esto pasa, por ejemplo, con $f(x) = \dfrac{\sin x}{x}$ evaluada en $x=0$, o
+con $f(x) = x^x$ evaluada en $x=0$ (forma $0^0$).
+
+Esta calculadora **detecta automáticamente** estos casos de dos maneras:
+
+- Si la evaluación numérica directa da `NaN` o `±∞` (caso típico de
+  $0/0$, $\infty/\infty$, $0\cdot\infty$, $\infty-\infty$), se reconoce
+  como indeterminación.
+- Si la evaluación da un número "válido" pero matemáticamente engañoso —
+  como $0^0$, que en Python/NumPy se calcula por convención como $1$ sin
+  avisar — la calculadora igual lo detecta inspeccionando la estructura
+  simbólica de $f(x)$.
+
+En ambos casos, el programa **resuelve la indeterminación calculando el
+límite simbólico** de $f(x)$ en ese punto con SymPy (que aplica, según
+corresponda, la Regla de L'Hôpital, desarrollo en series de Taylor, o
+simplificación algebraica), y usa ese límite como el valor real de
+$f(x_i)$ en la fórmula de integración. Cada vez que esto ocurre, vas a ver
+un aviso con el **tipo de indeterminación** detectada y el **valor
+resuelto**.
+""")
+
     st.title("Integración Numérica — Newton-Cotes")
 
     # ── Selector de método ────────────────────────────────────────────────────
@@ -1060,24 +1440,40 @@ son distintas ($1/180$ vs $1/80$).
         if method == "Rectángulo Medio":
             result, h, xs, xmids, fmids = _midpoint(f, a, b, n)
             _result_cards(result, n, h, "Rectángulo Medio", d)
+            st.plotly_chart(
+                _plot_method(method, f, a, b, n, h, xs, xmids=xmids, fmids=fmids),
+                use_container_width=True,
+            )
             _show_lhopital_warning(f, d)
             _show_midpoint(result, h, a, b, n, xs, xmids, fmids, d, a_str, b_str)
 
         elif method == "Trapecios":
             result, h, xs, fxs = _trapezoid(f, a, b, n)
             _result_cards(result, n, h, "Trapecios", d)
+            st.plotly_chart(
+                _plot_method(method, f, a, b, n, h, xs, fxs=fxs),
+                use_container_width=True,
+            )
             _show_lhopital_warning(f, d)
             _show_trapezoid(result, h, a, b, n, xs, fxs, d, a_str, b_str)
 
         elif method == "Simpson 1/3":
             result, h, xs, fxs, coeffs = _simpson13(f, a, b, n)
             _result_cards(result, n, h, "Simpson 1/3", d)
+            st.plotly_chart(
+                _plot_method(method, f, a, b, n, h, xs, fxs=fxs),
+                use_container_width=True,
+            )
             _show_lhopital_warning(f, d)
             _show_simpson13(result, h, a, b, n, xs, fxs, coeffs, d, a_str, b_str)
 
         elif method == "Simpson 3/8":
             result, h, xs, fxs, coeffs = _simpson38(f, a, b, n)
             _result_cards(result, n, h, "Simpson 3/8", d)
+            st.plotly_chart(
+                _plot_method(method, f, a, b, n, h, xs, fxs=fxs),
+                use_container_width=True,
+            )
             _show_lhopital_warning(f, d)
             _show_simpson38(result, h, a, b, n, xs, fxs, coeffs, d, a_str, b_str)
 
