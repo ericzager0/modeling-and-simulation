@@ -217,6 +217,114 @@ def run():
     </style>
     """, unsafe_allow_html=True)
 
+    # ── Teoría (desplegable, arriba de todo) ───────────────────────────────────
+    with st.expander("📘 Teoría: ¿Qué es el Polinomio Interpolador de Lagrange?", expanded=False):
+        st.markdown(r"""
+### ¿Qué es?
+
+Dado un conjunto de $n+1$ puntos $(x_0, y_0), (x_1, y_1), \dots, (x_n, y_n)$ con nodos
+$x_i$ todos distintos, el **polinomio interpolador de Lagrange** $P_n(x)$ es el
+**único** polinomio de grado a lo sumo $n$ que pasa exactamente por todos esos puntos:
+
+$$P_n(x_i) = y_i \qquad \text{para todo } i = 0, 1, \dots, n$$
+
+La idea central es que, si los puntos provienen de evaluar una función $f(x)$ que no
+conocemos del todo (o es difícil de calcular), $P_n(x)$ sirve como una **aproximación**
+de $f(x)$ en todo el intervalo, construida solo a partir de esos pares de valores.
+""")
+
+        st.markdown("### ¿Cómo se construye, paso a paso?")
+        st.markdown(r"""
+**1. Definir las bases de Lagrange $L_i(x)$.**
+
+Para cada nodo $x_i$ se construye un polinomio especial $L_i(x)$ que cumple una
+propiedad muy particular: vale **1** exactamente en $x_i$, y **0** en todos los demás
+nodos $x_j$ (con $j \neq i$):
+""")
+        st.latex(
+            r"L_i(x) = \prod_{\substack{j\,=\,0 \\ j\,\neq\,i}}^{n}"
+            r"\dfrac{x - x_j}{x_i - x_j}"
+        )
+        st.markdown(r"""
+Esto se logra dividiendo el producto de $(x - x_j)$ para todo $j \neq i$ (que se anula
+en cada $x_j$) por ese mismo producto evaluado en $x_i$ (una constante, que garantiza
+que el resultado valga 1 justo en $x_i$).
+
+**2. Combinar las bases con los valores $y_i$.**
+
+Una vez que se tienen todas las $L_i(x)$, el polinomio interpolador se arma como una
+suma ponderada: cada base $L_i(x)$ se multiplica por el valor $y_i$ que le corresponde,
+y se suman todos los términos:
+""")
+        st.latex(r"P_n(x) = \sum_{i=0}^{n} y_i \cdot L_i(x)")
+        st.markdown(r"""
+**3. ¿Por qué funciona?**
+
+Al evaluar $P_n(x)$ en un nodo $x_k$ cualquiera, todas las bases $L_i(x_k)$ con
+$i \neq k$ valen 0 (por construcción), y solo sobrevive el término $i = k$, donde
+$L_k(x_k) = 1$. Entonces $P_n(x_k) = y_k$: el polinomio efectivamente pasa por todos
+los puntos dados.
+
+**4. Expandir y simplificar.**
+
+Por último, se desarrolla la suma anterior y se agrupan términos semejantes para
+obtener $P_n(x)$ en su forma polinómica habitual (potencias de $x$ con coeficientes),
+que es la que se suele usar para evaluar o graficar.
+""")
+
+        st.markdown("### Fórmulas del error")
+        st.markdown(r"""
+Cuando los puntos provienen de una función conocida $f(x)$ que es derivable
+$n+1$ veces, el polinomio $P_n(x)$ no coincide exactamente con $f(x)$ fuera de los
+nodos: existe un **error de interpolación**. Existen dos formas de cuantificarlo.
+
+**Error exacto (forma de Lagrange del resto).** Para cada $x$ fijo, existe algún
+$\xi$ (dependiente de $x$) dentro del intervalo que contiene a los nodos, tal que:
+""")
+        st.latex(
+            r"f(x) - P_n(x) = \dfrac{f^{(n+1)}(\xi)}{(n+1)!}\,\prod_{i=0}^{n}(x - x_i)"
+        )
+        st.markdown(r"""
+El problema práctico es que no se conoce $\xi$ exactamente, solo que existe. Por eso,
+en la práctica se usa una **cota superior** del error, válida para cualquier punto del
+intervalo:
+""")
+        st.latex(
+            r"E_{m\acute{a}x} = \dfrac{M_1}{(n+1)!}\,M_2"
+        )
+        st.latex(
+            r"M_1 = \max_{t\,\in\,[x_0,\,x_n]}\left|f^{(n+1)}(t)\right|"
+        )
+        st.latex(
+            r"M_2 = \max_{t\,\in\,[x_0,\,x_n]}\left|\,\prod_{i=0}^{n}(t - x_i)\,\right|"
+        )
+        st.markdown(r"""
+Acá $M_1$ es el mayor valor (en valor absoluto) que toma la derivada de orden $n+1$
+de $f$ dentro del intervalo, y $M_2$ es el mayor valor (en valor absoluto) que toma el
+producto $\prod (t - x_i)$ en ese mismo intervalo. Esta cota **no depende de un punto
+$\xi$ particular**: es válida para todo el intervalo de interpolación.
+
+**Error local (cuando se conoce $f$).** Si además se cuenta con la expresión exacta de
+$f(x)$, el error real en un punto puntual $\xi$ se puede calcular directamente, sin
+aproximaciones, comparando $f(\xi)$ con $P_n(\xi)$:
+""")
+        st.latex(r"E(\xi) = \bigl|f(\xi) - P_n(\xi)\bigr|")
+        st.markdown(r"""
+Este error local siempre debe ser menor o igual que la cota teórica $E_{m\acute{a}x}$
+calculada arriba — si no lo es, suele deberse a que $M_1$ se estimó por muestreo
+numérico y subestimó el verdadero máximo de la derivada.
+""")
+
+        st.markdown(r"""
+### Ventajas y desventajas
+
+| Ventajas | Desventajas |
+|---|---|
+| Pasa **exactamente** por todos los puntos dados | Con muchos nodos puede oscilar mucho entre ellos (fenómeno de Runge) |
+| No requiere resolver sistemas de ecuaciones | Agregar un nuevo punto obliga a recalcular todo el polinomio desde cero |
+| Fórmula cerrada, fácil de programar | Numéricamente puede ser inestable si los nodos están muy juntos o hay muchos |
+""")
+
     st.title("Interpolación de Lagrange")
 
     # ── f(x) — opcional ───────────────────────────────────────────────────────
@@ -598,11 +706,175 @@ def run():
             st.latex(rf"\boxed{{\ P_{{{degree}}}({xi_disp}) = {P_xi:.10g}\ }}")
 
             # ══════════════════════════════════════════════════════════════════
-            # PASO 4 (opcional) — Error de interpolación
+            # PASO 4 (opcional) — Cota teórica del error (error máximo)
+            # ══════════════════════════════════════════════════════════════════
+            cota_calculada = None
+            if f_func is not None:
+                st.markdown("---")
+                st.markdown(r"### Paso 4 — Cota teórica del error (error máximo)")
+
+                deriv_order = n  # con n nodos, la fórmula usa la derivada de orden n
+                interval_lo, interval_hi = min(xs), max(xs)
+
+                st.markdown(
+                    f"Con **{n} nodos**, la fórmula del error de Lagrange utiliza "
+                    f"la derivada de orden **{deriv_order}** de $f$. Esta es una cota "
+                    "**teórica**, válida para cualquier punto del intervalo "
+                    f"$[{_fmt(interval_lo)}, {_fmt(interval_hi)}]$ — no depende de ξ:"
+                )
+                st.latex(
+                    rf"E_{{m\acute{{a}}x}} = \dfrac{{M_1}}{{{deriv_order}!}}\,M_2"
+                )
+                st.latex(
+                    rf"M_1 = \max_{{t\,\in\,[{_fmt(interval_lo)},\,{_fmt(interval_hi)}]}}"
+                    rf"\left|f^{{({deriv_order})}}(t)\right|"
+                )
+                st.latex(
+                    rf"M_2 = \max_{{t\,\in\,[{_fmt(interval_lo)},\,{_fmt(interval_hi)}]}}"
+                    rf"\left|g(t)\right|"
+                )
+                st.latex(
+                    rf"g(x) = \prod_{{i=0}}^{{{n - 1}}}(x - x_i)"
+                )
+
+                try:
+                    import math
+
+                    # ── M1: máximo de |f^(n)(t)| en [min xi, max xi] ────────────
+                    # Se obtiene analíticamente: raíces reales de f^(n+1)(t) = 0
+                    # (puntos críticos de f^(n)) dentro del intervalo, más los
+                    # extremos; se evalúa f^(n) en esos candidatos y se toma el máx.
+                    f_deriv_expr  = sp.diff(f_expr, x_sym, deriv_order)
+                    f_deriv2_expr = sp.diff(f_deriv_expr, x_sym)  # críticos de f^(n)
+                    f_deriv_func  = sp.lambdify(x_sym, f_deriv_expr, modules=["numpy"])
+
+                    m1_candidates = {interval_lo, interval_hi}
+                    try:
+                        crit_f = sp.solve(sp.Eq(f_deriv2_expr, 0), x_sym)
+                        for cp in crit_f:
+                            if cp.is_real:
+                                cpf = float(cp)
+                                if interval_lo - 1e-9 <= cpf <= interval_hi + 1e-9:
+                                    m1_candidates.add(cpf)
+                    except Exception:
+                        pass  # si no resuelve simbólicamente, usamos extremos + muestreo
+
+                    # Refuerzo numérico: muestreo denso por si f^(n) no es polinómica
+                    # (ej. sin, exp) y sympy no resuelve f^(n+1)=0 en forma cerrada
+                    t_samples = np.linspace(interval_lo, interval_hi, 2001)
+                    with np.errstate(all="ignore"):
+                        deriv_vals = np.array(f_deriv_func(t_samples), dtype=float)
+                    finite_mask = np.isfinite(deriv_vals)
+
+                    cand_vals = []
+                    for c in m1_candidates:
+                        try:
+                            v = abs(float(f_deriv_func(c)))
+                            if np.isfinite(v):
+                                cand_vals.append((c, v))
+                        except Exception:
+                            pass
+                    if deriv_vals[finite_mask].size > 0:
+                        idx_max = np.argmax(np.abs(deriv_vals[finite_mask]))
+                        t_at_max = t_samples[finite_mask][idx_max]
+                        v_at_max = float(np.abs(deriv_vals[finite_mask][idx_max]))
+                        cand_vals.append((t_at_max, v_at_max))
+
+                    if not cand_vals:
+                        raise ValueError(
+                            f"f^({deriv_order}) no pudo evaluarse en el intervalo."
+                        )
+
+                    t1_star, M1 = max(cand_vals, key=lambda p: p[1])
+
+                    # ── M2: máximo de |g(t)| en [min xi, max xi] (analítico) ────
+                    g_sym = sp.Integer(1)
+                    for xv in xs:
+                        g_sym *= (x_sym - _sym(xv))
+                    g_sym = sp.expand(g_sym)
+                    g_prime = sp.diff(g_sym, x_sym)
+
+                    m2_candidates = [sp.Float(interval_lo), sp.Float(interval_hi)]
+                    g_poly = sp.Poly(g_prime, x_sym)
+                    if g_poly.degree() >= 1:
+                        for r in g_poly.real_roots():
+                            rf_ = float(r)
+                            if interval_lo - 1e-9 <= rf_ <= interval_hi + 1e-9:
+                                m2_candidates.append(r)
+
+                    g2_vals = [(c, abs(float(g_sym.subs(x_sym, c)))) for c in m2_candidates]
+                    t2_star, M2 = max(g2_vals, key=lambda p: p[1])
+
+                    fact = math.factorial(deriv_order)
+                    cota = (M1 / fact) * M2
+                    cota_calculada = cota
+
+                    # ── Desarrollo visual ────────────────────────────────────────
+                    st.latex(rf"f^{{({deriv_order})}}(x) = {sp.latex(f_deriv_expr)}")
+                    st.latex(
+                        rf"M_1 = \max_{{t\,\in\,[{_fmt(interval_lo)},\,{_fmt(interval_hi)}]}}"
+                        rf"\left|f^{{({deriv_order})}}(t)\right|"
+                        rf" = \left|f^{{({deriv_order})}}({_fmt(t1_star)})\right| \approx {M1:.6g}"
+                    )
+
+                    st.latex(rf"g(x) = {_expr_to_latex(g_sym, 'Decimal')}")
+                    st.latex(rf"g'(x) = {_expr_to_latex(g_prime, 'Decimal')}")
+                    st.markdown(
+                        "Puntos críticos de $g$ dentro del intervalo "
+                        f"$[{_fmt(interval_lo)}, {_fmt(interval_hi)}]$ "
+                        "(raíces de $g'(x)=0$) y extremos del intervalo:"
+                    )
+                    cand_str = r",\ ".join(_fmt(c) for c, _ in g2_vals)
+                    st.latex(rf"t \in \{{{cand_str}\}}")
+
+                    # ── Evaluación de g en cada candidato + cómo se elige el máximo ──
+                    eval_lines = r" \\[4pt] ".join(
+                        rf"|g({_fmt(c)})| = {v:.6g}" for c, v in g2_vals
+                    )
+                    st.latex(rf"\begin{{aligned}} {eval_lines} \end{{aligned}}")
+                    st.markdown(
+                        f"El mayor valor en valor absoluto se da en $t = {_fmt(t2_star)}$, "
+                        f"por lo tanto:"
+                    )
+                    st.latex(
+                        rf"M_2 = \max\left|g(t)\right|"
+                        rf" = \left|g({_fmt(t2_star)})\right| \approx {M2:.6g}"
+                    )
+
+                    st.latex(
+                        rf"E_{{m\acute{{a}}x}} = \dfrac{{M_1}}{{{deriv_order}!}}\,M_2"
+                        rf"= \dfrac{{{M1:.6g}}}{{{fact}}} \cdot {M2:.6g}"
+                    )
+
+                    cota_plain = f"{cota:.10g}"
+                    st.latex(rf"\boxed{{\ E_{{m\acute{{a}}x}} \approx {cota_plain}\ }}")
+
+                    st.markdown(f"""
+                    <div class="result-cards">
+                        <div class="result-card" style="border-top: 3px solid #f59e0b;">
+                            <div class="rc-label">Cota teórica del error</div>
+                            <div class="rc-value">{cota_plain}</div>
+                            <div class="rc-sub">M₁·M₂ / {deriv_order}!</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    st.caption(
+                        "Cota válida para todo el intervalo (no depende de ξ): "
+                        "M₁ es el máximo de |f⁽ⁿ⁾(t)| y M₂ es el máximo de |g(t)| = "
+                        "|∏(t−xᵢ)|, ambos hallados analíticamente sobre "
+                        f"[{_fmt(interval_lo)}, {_fmt(interval_hi)}]."
+                    )
+
+                except Exception as e:
+                    st.error(f"No se pudo calcular la cota teórica del error: {e}")
+
+            # ══════════════════════════════════════════════════════════════════
+            # PASO 5 (opcional) — Error local en ξ
             # ══════════════════════════════════════════════════════════════════
             if f_func is not None:
                 st.markdown("---")
-                st.markdown(r"### Paso 4 — Error de interpolación en $\xi$")
+                st.markdown(r"### Paso 5 — Error local en $\xi$")
 
                 try:
                     f_xi  = float(f_func(xi_val))
@@ -639,6 +911,32 @@ def run():
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
+
+                    # ══════════════════════════════════════════════════════════
+                    # Verificación — error local vs. cota teórica
+                    # ══════════════════════════════════════════════════════════
+                    if cota_calculada is not None:
+                        st.markdown("---")
+                        st.markdown("### Verificación — error local vs. cota teórica")
+
+                        cota_disp = f"{cota_calculada:.10g}"
+                        cumple    = error <= cota_calculada + 1e-9
+
+                        if cumple:
+                            st.success(
+                                rf"✔ Se cumple la cota: "
+                                rf"$|f(\xi) - P_{{{degree}}}(\xi)| = {error_plain} "
+                                rf"\;\leq\; E_{{m\acute{{a}}x}} \approx {cota_disp}$"
+                            )
+                        else:
+                            st.warning(
+                                rf"⚠ El error local **supera** la cota teórica calculada: "
+                                rf"$|f(\xi) - P_{{{degree}}}(\xi)| = {error_plain} "
+                                rf"\;>\; E_{{m\acute{{a}}x}} \approx {cota_disp}$. "
+                                rf"Esto suele deberse a que $M$ se estimó por muestreo "
+                                rf"numérico de $f^{{({n})}}(t)$ y puede subestimar el "
+                                rf"verdadero máximo de la derivada."
+                            )
 
                 except Exception as e:
                     st.error(f"No se pudo evaluar f(ξ): {e}")

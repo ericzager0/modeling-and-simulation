@@ -254,6 +254,146 @@ def run():
     </style>
     """, unsafe_allow_html=True)
 
+    # ── Teoría (desplegable, arriba de todo) ───────────────────────────────────
+    with st.expander("📘 Teoría: ¿Cómo funcionan los métodos de Euler, Heun y RK4?", expanded=False):
+        st.markdown(r"""
+### ¿Qué hacen estos tres métodos?
+
+Euler, Heun y Runge–Kutta de orden 4 (RK4) son **métodos numéricos para resolver
+problemas de valor inicial (PVI)** de la forma:
+""")
+        st.latex(r"y' = f(x,y), \qquad y(x_0) = y_0")
+        st.markdown(r"""
+Cuando no se puede (o es muy difícil) encontrar la solución exacta $y(x)$ de forma
+analítica, estos métodos permiten **aproximarla numéricamente**, generando una sucesión
+de puntos $(x_0,y_0),\,(x_1,y_1),\,(x_2,y_2),\dots$ que se acercan a la curva real.
+""")
+
+        st.markdown("### ¿Qué tienen en común?")
+        st.markdown(r"""
+1. **Discretizan el intervalo.** Dividen $[x_0,\,x_{end}]$ en pasos de tamaño $h$,
+   generando los puntos $x_n = x_0 + n\,h$.
+2. **Son métodos de un paso ("one-step").** Para calcular $y_{n+1}$ solo usan la
+   información del punto anterior $(x_n, y_n)$ — no necesitan recordar todo el
+   historial previo, a diferencia de los métodos multipaso.
+3. **Comparten la misma estructura general:**
+""")
+        st.latex(r"y_{n+1} = y_n + h \cdot \varphi(x_n,\, y_n,\, h)")
+        st.markdown(r"""
+   donde $\varphi$ es una *función de incremento* que estima la **pendiente promedio**
+   de la solución dentro del tramo $[x_n,\,x_n+h]$, a partir de una o más evaluaciones
+   de $f(x,y)$.
+4. **Lo único que cambia entre ellos es cómo se calcula esa pendiente $\varphi$:**
+   cuántas veces se evalúa $f$ por paso y en qué puntos del intervalo. Esa diferencia
+   es justamente lo que determina qué tan preciso es cada método (su **orden** de
+   convergencia).
+5. **Ninguno da la solución exacta.** En cada paso se comete un pequeño error de
+   *truncamiento local*, que se va acumulando a lo largo de todos los pasos hasta
+   convertirse en el error *global*. Cuantas más evaluaciones de $f$ use el método
+   por paso, menor es ese error — pero más caro resulta computacionalmente.
+""")
+
+        st.markdown("---")
+        st.markdown("### 1️⃣ Método de Euler (orden 1)")
+        st.latex(r"y_{n+1} = y_n + h \cdot f(x_n,\, y_n)")
+        st.markdown(r"""
+Es el más simple de los tres. En cada paso:
+
+1. Evalúa la pendiente de la curva **una sola vez**, en el punto actual:
+   $k_1 = f(x_n, y_n)$.
+2. Avanza en línea recta con esa pendiente durante todo el paso $h$.
+
+Geométricamente equivale a seguir la **recta tangente** a la solución en $(x_n, y_n)$
+a lo largo de un tramo de longitud $h$. Como la pendiente solo se calcula al *inicio*
+del intervalo, si la curva se curva mucho dentro del paso, el método se va "despegando"
+de la solución real.
+
+Es un método de **orden 1**: el error de truncamiento local es $O(h^2)$ y el error
+global acumulado es $O(h)$. Es el más económico de los tres (1 sola evaluación de $f$
+por paso), pero también el menos preciso.
+""")
+
+        st.markdown("### 2️⃣ Método de Heun (orden 2, Euler mejorado)")
+        st.markdown(r"""
+Heun corrige el principal defecto de Euler —usar solo la pendiente al inicio del
+paso— agregando un esquema de **predicción + corrección**:
+""")
+        col_t1, col_t2 = st.columns(2)
+        with col_t1:
+            st.markdown(r"""
+**Predictor** — igual que Euler: calcula la pendiente al inicio y, con ella, estima
+provisoriamente el punto siguiente.
+""")
+            st.latex(r"k_1 = f(x_n,\, y_n)")
+            st.latex(r"\hat{y}_{n+1} = y_n + h\,k_1")
+        with col_t2:
+            st.markdown(r"""
+**Corrector** — evalúa la pendiente en ese punto estimado, y promedia ambas
+pendientes para dar el paso definitivo.
+""")
+            st.latex(r"k_2 = f(x_n+h,\, \hat{y}_{n+1})")
+            st.latex(r"y_{n+1} = y_n + \dfrac{h}{2}\,(k_1 + k_2)")
+        st.markdown(r"""
+En vez de usar solo la pendiente al inicio del paso (como Euler), Heun también "mira"
+cuál sería la pendiente al final del paso —estimada con el predictor— y avanza con el
+**promedio** de ambas. Eso compensa el sesgo direccional de Euler y mejora notablemente
+la precisión.
+
+Es un método de **orden 2** (también llamado RK2): error local $O(h^3)$, error global
+$O(h^2)$. A cambio de esa mejora, paga el costo de evaluar $f$ **dos veces** por paso
+en lugar de una.
+""")
+
+        st.markdown("### 3️⃣ Runge–Kutta de orden 4 (RK4)")
+        st.markdown(r"""
+RK4 lleva la idea de Heun —promediar varias pendientes dentro del paso— un poco más
+lejos: evalúa $f$ en **cuatro** puntos distintos del intervalo $[x_n,\,x_n+h]$,
+usando cada pendiente recién calculada para "asomarse" un poco más adentro del paso:
+""")
+        col_r1, col_r2 = st.columns(2)
+        with col_r1:
+            st.latex(r"k_1 = f(x_n,\, y_n)")
+            st.latex(r"k_2 = f\!\left(x_n+\tfrac{h}{2},\; y_n+\tfrac{h}{2}k_1\right)")
+            st.latex(r"k_3 = f\!\left(x_n+\tfrac{h}{2},\; y_n+\tfrac{h}{2}k_2\right)")
+            st.latex(r"k_4 = f(x_n+h,\; y_n+h\,k_3)")
+        with col_r2:
+            st.markdown(r"""
+- $k_1$: pendiente al **inicio** del paso.
+- $k_2$: pendiente en el **punto medio**, estimada avanzando medio paso con $k_1$.
+- $k_3$: una **segunda estimación** de la pendiente en el punto medio, esta vez
+  avanzando medio paso con $k_2$ (más afinada que $k_2$).
+- $k_4$: pendiente al **final** del paso, estimada avanzando el paso completo
+  con $k_3$.
+""")
+        st.markdown("Luego combina las cuatro pendientes con un promedio ponderado:")
+        st.latex(r"y_{n+1} = y_n + \dfrac{h}{6}\,(k_1 + 2k_2 + 2k_3 + k_4)")
+        st.markdown(r"""
+Los pesos $1,2,2,1$ le dan más peso a las dos estimaciones del punto medio —que son
+más representativas de cómo se comporta la curva *dentro* del paso— la misma idea que
+está detrás de la regla de Simpson para integrar.
+
+Es un método de **orden 4**: error local $O(h^5)$, error global $O(h^4)$. Es mucho más
+preciso que Euler y Heun usando el mismo paso $h$, a costa de evaluar $f$ **cuatro
+veces** por paso.
+""")
+
+        st.markdown("---")
+        st.markdown("### Comparación rápida")
+        st.markdown(r"""
+| Método | Evaluaciones de $f$ por paso | Orden | Error global | Costo computacional |
+|---|:---:|:---:|:---:|:---:|
+| Euler | 1 | 1 | $O(h)$   | Bajo  |
+| Heun  | 2 | 2 | $O(h^2)$ | Medio |
+| RK4   | 4 | 4 | $O(h^4)$ | Alto  |
+""")
+        st.markdown(r"""
+**¿Por qué importa el orden?** Si se reduce el paso $h$ a la mitad, el error de Euler
+se reduce aproximadamente a la mitad (factor $2$), el de Heun a un cuarto (factor $4$)
+y el de RK4 a un dieciseisavo (factor $16$). Por eso RK4 logra mucha más precisión sin
+necesitar pasos extremadamente chicos, aunque pague el precio de evaluar $f$ más veces
+por paso.
+""")
+
     st.title("Métodos Numéricos para EDOs")
 
     # ── EDO ───────────────────────────────────────────────────────────────────

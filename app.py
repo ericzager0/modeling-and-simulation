@@ -13,7 +13,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-PAGINAS = ["Teoría", "Bisección", "Punto Fijo", "Aitken", "Newton-Raphson", "Lagrange", "Newton-Cotes", "Montecarlo", "EDOs"]
+PAGINAS = ["Teoría", "Bisección", "Punto Fijo", "Aitken", "Newton-Raphson", "Lagrange", "Diferencias Finitas", "Newton-Cotes", "Montecarlo", "EDOs"]
 
 with st.sidebar:
     pagina = st.radio("Navegación", PAGINAS, label_visibility="collapsed")
@@ -40,6 +40,10 @@ elif pagina == "Newton-Raphson":
 
 elif pagina == "Lagrange":
     from methods.lagrange import run
+    run()
+
+elif pagina == "Diferencias Finitas":
+    from methods.finite_differences import run
     run()
 
 elif pagina == "Newton-Cotes":
