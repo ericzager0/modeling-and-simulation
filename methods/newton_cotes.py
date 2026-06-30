@@ -1,3 +1,4 @@
+import math
 import streamlit as st
 import sympy as sp
 import numpy as np
@@ -499,55 +500,99 @@ _TRUNC_CFG = {
 }
 
 
-def _max_abs_on_interval(expr, x_sym, a, b):
+def _max_abs_on_interval(expr, x_sym, a, b, n_samples=400):
     """
-    Calcula de forma EXACTA (simbólica) el máximo de |expr| en [a, b].
+    Calcula NUMÉRICAMENTE el máximo de |expr| en [a, b].
 
-    Estrategia (estándar de cálculo / análisis numérico):
-      1. Encontrar los puntos críticos de expr en (a, b): expr' = 0.
-      2. Filtrar los que son reales y caen dentro de (a, b).
-      3. Evaluar |expr| en los puntos críticos y en los extremos a, b.
-      4. El máximo de esos valores es el máximo absoluto buscado.
+    Antes esta función llamaba a sp.solve(expr' = 0, x) para hallar los
+    puntos críticos EXACTOS. Para derivadas de funciones transcendentes
+    compuestas (p.ej. sin(x)/(x+ln(x+1))) sp.solve puede directamente no
+    converger nunca — quedando la app "cargando" indefinidamente. Por eso
+    ahora se usa una búsqueda numérica robusta y acotada en tiempo:
+
+      1. Se evalúa |expr| en una grilla densa de [a, b].
+      2. Cada máximo local de esa grilla — y los dos extremos del
+         intervalo — se refina con una búsqueda de sección áurea para
+         acercarse al máximo real sin necesitar resolver expr' = 0.
+      3. Si expr no es evaluable en alguno de los extremos (p. ej. una
+         indeterminación removible, algo común al derivar una función que
+         ya tenía una en f(x)), se calcula ahí el LÍMITE simbólico en vez
+         de descartar ese candidato, para no perder un máximo real ubicado
+         justo en el borde del intervalo.
 
     Devuelve (max_val: float, x_max: float, candidatos: list[(x, |expr(x)|)])
     """
-    deriv = sp.diff(expr, x_sym)
+    g = sp.lambdify(x_sym, expr, modules=["numpy"])
 
-    # Puntos críticos (raíces de la derivada) dentro de (a, b)
-    crit_points = []
-    try:
-        sols = sp.solve(sp.Eq(deriv, 0), x_sym)
-    except Exception:
-        sols = []
+    def _abs_at(xv):
+        with np.errstate(divide="ignore", invalid="ignore"):
+            try:
+                val = complex(g(xv))
+            except Exception:
+                return None
+        if math.isfinite(val.real) and abs(val.imag) < 1e-6:
+            return abs(val.real)
+        return None
 
-    for s in sols:
+    def _abs_endpoint(xv):
+        v = _abs_at(xv)
+        if v is not None:
+            return v
         try:
-            s_val = complex(s.evalf())
+            lim = complex(sp.limit(expr, x_sym, xv).evalf())
+            if math.isfinite(lim.real) and abs(lim.imag) < 1e-6:
+                return abs(lim.real)
         except Exception:
-            continue
-        # descartar soluciones no reales
-        if abs(s_val.imag) > 1e-9:
-            continue
-        s_real = s_val.real
-        if a - 1e-9 <= s_real <= b + 1e-9:
-            # clamp por seguridad numérica a los bordes del intervalo
-            s_real = min(max(s_real, a), b)
-            crit_points.append(s_real)
+            pass
+        return None
 
-    # Candidatos: extremos del intervalo + puntos críticos
-    candidatos_x = [a, b] + crit_points
+    xs = np.linspace(a, b, n_samples)
+    ys = np.full(n_samples, np.nan)
+    for i, xv in enumerate(xs):
+        v = _abs_endpoint(xv) if (i == 0 or i == n_samples - 1) else _abs_at(xv)
+        if v is not None:
+            ys[i] = v
+    valid = np.isfinite(ys)
 
-    # Evaluar |expr| en cada candidato (numéricamente, vía SymPy para exactitud)
+    if not valid.any():
+        raise ValueError("No se pudo evaluar la derivada en el intervalo dado.")
+
+    candidate_idxs = [
+        i for i in range(n_samples) if valid[i] and (
+            i == 0 or i == n_samples - 1 or
+            (valid[i - 1] and valid[i + 1] and ys[i] >= ys[i - 1] and ys[i] >= ys[i + 1])
+        )
+    ]
+
+    def _golden_refine(lo, hi):
+        gr = (math.sqrt(5) - 1) / 2
+        c, d_ = hi - gr * (hi - lo), lo + gr * (hi - lo)
+        for _ in range(60):
+            fc, fd = _abs_at(c), _abs_at(d_)
+            fc = fc if fc is not None else -math.inf
+            fd = fd if fd is not None else -math.inf
+            if fc < fd:
+                lo = c
+            else:
+                hi = d_
+            c, d_ = hi - gr * (hi - lo), lo + gr * (hi - lo)
+        xm = (lo + hi) / 2
+        fm = _abs_at(xm)
+        return xm, fm if fm is not None else -math.inf
+
+    step = (b - a) / (n_samples - 1) if n_samples > 1 else (b - a)
     candidatos = []
-    for xv in candidatos_x:
-        try:
-            val = abs(float(expr.subs(x_sym, xv).evalf()))
-            if np.isnan(val) or np.isinf(val):
-                continue
-            candidatos.append((xv, val))
-        except Exception:
-            continue
+    for i in candidate_idxs:
+        xv = float(xs[i])
+        if i == 0 or i == n_samples - 1:
+            candidatos.append((xv, float(ys[i])))
+        else:
+            lo, hi = max(a, xv - step), min(b, xv + step)
+            xm, fm = _golden_refine(lo, hi)
+            if math.isfinite(fm):
+                candidatos.append((xm, fm))
 
+    candidatos = [(xv, val) for xv, val in candidatos if math.isfinite(val)]
     if not candidatos:
         raise ValueError("No se pudo evaluar la derivada en el intervalo dado.")
 
@@ -557,8 +602,9 @@ def _max_abs_on_interval(expr, x_sym, a, b):
 
 def _show_max_error(method, deriv_expr, deriv_latex, a, b, h, d, a_str, b_str):
     """
-    Error Máximo Posible (cota de error): usa el máximo EXACTO de |derivada|
-    en [a, b] en lugar de un ξ puntual. No requiere que el usuario ingrese ξ.
+    Error Máximo Posible (cota de error): usa el máximo NUMÉRICO de
+    |derivada| en [a, b] en lugar de un ξ puntual. No requiere que el
+    usuario ingrese ξ.
     """
     al, bl = _val_latex(a_str), _val_latex(b_str)
     cfg    = _TRUNC_CFG[method]
@@ -576,10 +622,10 @@ def _show_max_error(method, deriv_expr, deriv_latex, a, b, h, d, a_str, b_str):
     try:
         max_val, x_max, candidatos = _max_abs_on_interval(deriv_expr, x_sym, a, b)
     except Exception as exc:
-        st.warning(f"No se pudo calcular el máximo exacto de la derivada: {exc}")
+        st.warning(f"No se pudo calcular el máximo de la derivada: {exc}")
         return
 
-    # Tabla de candidatos (extremos + puntos críticos)
+    # Tabla de candidatos (extremos + máximos locales ubicados numéricamente)
     rows = [
         r"| Punto candidato | $\lvert {} \rvert$ |".format(cfg["dx_name"]),
         "|:---:|:---:|",
@@ -587,8 +633,8 @@ def _show_max_error(method, deriv_expr, deriv_latex, a, b, h, d, a_str, b_str):
     for xv, val in sorted(candidatos, key=lambda t: t[0]):
         rows.append(f"| {_fmt(xv, d)} | {_fmt(val, d)} |")
     st.markdown(
-        "**Candidatos a máximo** (extremos del intervalo + puntos críticos "
-        f"donde $\\frac{{d}}{{dx}}{cfg['dx_name']} = 0$):\n\n"
+        "**Candidatos a máximo** (extremos del intervalo + máximos locales, "
+        "ubicados numéricamente):\n\n"
         + "\n".join(rows)
     )
 
@@ -614,10 +660,18 @@ def _show_max_error(method, deriv_expr, deriv_latex, a, b, h, d, a_str, b_str):
 
 def _show_truncation_error(method, expr, x_sym, a, b, n, h, xi, xi_str, d, a_str, b_str):
     """
-    Sección de Error de Truncamiento.
-    Muestra la fórmula, la derivada simbólica, el ERROR MÁXIMO POSIBLE
-    (calculado de forma exacta a partir del máximo de la derivada en [a,b],
-    sin necesitar ξ) y — si el usuario ingresó ξ — el error puntual en ξ.
+    Sección de Error de Truncamiento: fórmula, coeficiente, derivada
+    simbólica y (si el usuario cargó ξ) el error puntual.
+
+    El cálculo del "Error Máximo Posible" (que requiere buscar el máximo
+    de |derivada| en [a,b] y es la parte más costosa) se hace aparte, en
+    `_show_max_error`. El caller (`run`) la invoca DESPUÉS de esta función
+    y de `_show_real_error`, así el usuario ve primero todo lo demás
+    (incluido el error real contra el valor exacto) antes de pasar por
+    esa parte.
+
+    Devuelve la derivada simbólica calculada (o None si falló), para que
+    el caller la use luego en `_show_max_error` sin recalcularla.
     """
     al, bl = _val_latex(a_str), _val_latex(b_str)
     cfg    = _TRUNC_CFG[method]
@@ -646,16 +700,12 @@ def _show_truncation_error(method, expr, x_sym, a, b, n, h, xi, xi_str, d, a_str
         deriv_latex  = sp.latex(deriv_expr)
     except Exception as exc:
         st.warning(f"No se pudo calcular la derivada simbólica: {exc}")
-        return
+        return None
 
     st.markdown("**Derivada necesaria:**")
     st.latex(rf"{cfg['dx_name']} = {deriv_latex}")
 
-    # — Error Máximo Posible (NO requiere ξ) ──────────────────────────────────
-    st.markdown("")
-    _show_max_error(method, deriv_expr, deriv_latex, a, b, h, d, a_str, b_str)
-
-    # — Evaluación puntual en ξ (opcional) ────────────────────────────────────
+    # — Evaluación puntual en ξ (opcional, rápida) ────────────────────────────
     st.markdown("")
     st.markdown("#### 📍 Error Puntual en ξ (opcional)")
     if xi is not None:
@@ -686,8 +736,11 @@ def _show_truncation_error(method, expr, x_sym, a, b, n, h, xi, xi_str, d, a_str
         st.info(
             "💡 Ingresá un valor de **ξ** en el campo de entrada para calcular "
             "además el error de truncamiento puntual (no es necesario para el "
-            "error máximo posible, que ya se calculó arriba)."
+            "error máximo posible, que se muestra más abajo, después del "
+            "Error Real)."
         )
+
+    return deriv_expr
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1238,11 +1291,11 @@ $$
 |E| \;\le\; |\text{coeficiente}| \cdot \max_{x \,\in\, [a,b]} \left| f^{(k)}(x) \right|
 $$
 donde $k=2$ para Rectángulo Medio y Trapecios, y $k=4$ para ambos Simpson.
-El máximo de $|f^{(k)}(x)|$ se calcula evaluando la derivada en los extremos
-del intervalo y en sus puntos críticos (donde la siguiente derivada se anula),
-y tomando el mayor valor absoluto entre todos esos candidatos — esto da el
-**peor caso posible** del error, garantizando que el error real nunca lo
-supera.
+El máximo de $|f^{(k)}(x)|$ se calcula numéricamente, evaluando una grilla
+densa de puntos en el intervalo y refinando cada máximo local (incluidos
+los extremos $a$ y $b$, donde si hace falta se usa el límite simbólico para
+cubrir indeterminaciones removibles) — esto da el **peor caso posible** del
+error, garantizando que el error real nunca lo supera.
 
 Nótese que Rectángulo Medio y Trapecios comparten el mismo orden de
 convergencia $O(h^2)$ porque ambos usan polinomios de grado 1 o menor
@@ -1354,7 +1407,7 @@ resuelto**.
         placeholder="Ej: 0.5  |  pi/4  |  (a+b)/2  — debe pertenecer a [a, b]",
         help=(
             "El error máximo posible se calcula automáticamente usando el máximo "
-            "exacto de la derivada en [a, b], sin necesitar ξ. "
+            "de la derivada en [a, b], sin necesitar ξ. "
             "Si además querés el error puntual evaluado en un ξ ∈ (a, b) específico "
             "(Teorema del Valor Medio), ingresalo acá."
         ),
@@ -1484,12 +1537,25 @@ resuelto**.
             )
             return
 
-        _show_truncation_error(
+        # 1) Error de Truncamiento: fórmula, coeficiente, derivada y ξ puntual
+        #    (todo rápido). Devuelve la derivada simbólica para usarla abajo.
+        deriv_expr = _show_truncation_error(
             method, f.expr, f.x_sym, a, b, n, h, xi, xi_str, d, a_str, b_str
         )
+
+        # 2) Error Real vs. integral exacta (SymPy).
         _show_real_error(
             f.expr, f.x_sym, a, b, result, d, a_str, b_str, exact_override
         )
+
+        # 3) Error Máximo Posible — la parte más costosa de calcular, se deja
+        #    para el final así el usuario ya tiene todo lo demás visible
+        #    mientras se resuelve (y ahora, gracias al fix, ya no se traba).
+        if deriv_expr is not None:
+            st.markdown("---")
+            _show_max_error(
+                method, deriv_expr, sp.latex(deriv_expr), a, b, h, d, a_str, b_str
+            )
 
 
 if __name__ == "__main__":
