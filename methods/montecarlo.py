@@ -172,32 +172,88 @@ def _num_latex(expr) -> str:
 
 
 def _solve_analytical_1d(func_str: str, a: float, b: float):
+    """
+    Resuelve la integral definida en forma cerrada.
+
+    IMPORTANTE: se usa sp.integrate(expr, (x, a, b)) -- integral DEFINIDA
+    directa -- como fuente de verdad para el resultado, en vez de calcular
+    la primitiva indefinida F(x) y restar F(b) - F(a) "a mano". Ese segundo
+    enfoque (Barrow manual) puede dar resultados silenciosamente incorrectos
+    cuando f(x) tiene una asintota o discontinuidad dentro de [a, b]: por
+    ejemplo f(x) = 1/x**2 en [-1, 1] da F(b)-F(a) = -2 (un valor finito y
+    encima negativo, aunque el integrando es siempre positivo y la integral
+    en realidad diverge). sp.integrate con limites definidos si detecta
+    estos casos. La primitiva F(x) se sigue calculando, pero solo para
+    mostrar el desarrollo pedagogico paso a paso, y unicamente cuando
+    coincide con el resultado confiable de la integral definida.
+    """
     x, ld  = _local_dict_1d()
     expr   = sp.sympify(func_str.replace("^", "**"), locals=ld)
     a_sym  = sp.nsimplify(a, rational=True)
     b_sym  = sp.nsimplify(b, rational=True)
 
+    # 1) Integral definida directa: esta es la fuente de verdad.
     try:
-        F = sp.integrate(expr, x)
+        result_sym = sp.integrate(expr, (x, a_sym, b_sym))
     except Exception as e:
         return {"error": str(e)}
 
-    if F.has(sp.Integral):
-        return {"error": "SymPy no encontro una primitiva en forma cerrada."}
+    if result_sym.has(sp.Integral):
+        return {"error": "SymPy no encontro una solucion en forma cerrada para esta integral."}
 
-    ne         = _has_nonelementary(F)
-    F_b        = F.subs(x, b_sym)
-    F_a        = F.subs(x, a_sym)
-    result_sym = sp.simplify(F_b - F_a)
-    result_num = float(result_sym.evalf())
+    result_sym = sp.simplify(result_sym)
 
-    # Si hay funciones no elementales, sustituimos el latex simbolico por numerico
+    # 2) Validar que el resultado sea un numero real y finito. Descarta
+    #    oo / -oo / zoo / nan (integral divergente) y resultados complejos
+    #    (sintoma tipico de una asintota dentro de [a, b], como tan(x)
+    #    cruzando pi/2).
+    if result_sym.has(sp.oo, -sp.oo, sp.zoo, sp.nan) or result_sym.is_extended_real is False:
+        return {
+            "error": (
+                f"La integral no converge a un valor real finito en el intervalo "
+                f"[{a}, {b}] (SymPy obtuvo: {sp.latex(result_sym)}). Es probable que "
+                "f(x) tenga una asintota, polo o discontinuidad dentro del intervalo "
+                "de integracion."
+            )
+        }
+
+    try:
+        result_num = float(result_sym.evalf())
+    except (TypeError, ValueError):
+        return {"error": "No se pudo evaluar numericamente el resultado obtenido por SymPy."}
+
+    ne_res = _has_nonelementary(result_sym)
+
+    # 3) Primitiva indefinida F(x), SOLO para mostrar el desarrollo paso a
+    #    paso (Teorema Fundamental del Calculo + Regla de Barrow). Se
+    #    calcula aparte y se usa unicamente si coincide con el resultado
+    #    confiable de arriba -- si no coincide (senal de que F no es
+    #    continua en todo [a, b]), se omiten esos pasos pedagogicos y se
+    #    muestra directamente el resultado de la integral definida.
+    F = F_b = F_a = None
+    show_steps = False
+    try:
+        F_candidate = sp.integrate(expr, x)
+        if not F_candidate.has(sp.Integral):
+            F_b_candidate = F_candidate.subs(x, b_sym)
+            F_a_candidate = F_candidate.subs(x, a_sym)
+            barrow_value = sp.simplify(F_b_candidate - F_a_candidate)
+            if (barrow_value.is_extended_real
+                    and sp.simplify(barrow_value - result_sym) == 0):
+                F, F_b, F_a = F_candidate, F_b_candidate, F_a_candidate
+                show_steps = True
+    except Exception:
+        pass
+
+    ne_F = _has_nonelementary(F) if F is not None else False
+
     return {
         "expr":       sp.latex(expr),
-        "F":          _num_latex(F)          if ne else sp.latex(F),
-        "F_at_b":     _num_latex(F_b)        if ne else sp.latex(F_b),
-        "F_at_a":     _num_latex(F_a)        if ne else sp.latex(F_a),
-        "result_sym": _num_latex(result_sym) if ne else sp.latex(result_sym),
+        "show_steps": show_steps,
+        "F":          (_num_latex(F)   if ne_F else sp.latex(F))   if show_steps else None,
+        "F_at_b":     (_num_latex(F_b) if ne_F else sp.latex(F_b)) if show_steps else None,
+        "F_at_a":     (_num_latex(F_a) if ne_F else sp.latex(F_a)) if show_steps else None,
+        "result_sym": _num_latex(result_sym) if ne_res else sp.latex(result_sym),
         "result_num": result_num,
         "a_sym":      sp.latex(a_sym),
         "b_sym":      sp.latex(b_sym),
@@ -233,7 +289,21 @@ def _solve_analytical_2d(func_str: str,
         return {"error": "SymPy no pudo resolver la integral exterior en y."}
 
     result_sym = sp.simplify(result_sym)
-    result_num = float(result_sym.evalf())
+
+    if result_sym.has(sp.oo, -sp.oo, sp.zoo, sp.nan) or result_sym.is_extended_real is False:
+        return {
+            "error": (
+                f"La integral no converge a un valor real finito en el dominio "
+                f"dado (SymPy obtuvo: {sp.latex(result_sym)}). Es probable que "
+                "f(x, y) tenga una asintota o discontinuidad dentro del dominio."
+            )
+        }
+
+    try:
+        result_num = float(result_sym.evalf())
+    except (TypeError, ValueError):
+        return {"error": "No se pudo evaluar numericamente el resultado obtenido por SymPy."}
+
     ne_res     = _has_nonelementary(result_sym)
 
     return {
@@ -583,6 +653,10 @@ def run():
 
         # Error estándar
         st.markdown("**Error estándar de la integral**")
+        st.markdown(
+            "Como la estimación es $I \\approx V \\cdot \\bar{f}_N$ y $V$ es una "
+            "constante, el error estándar de $\\bar{f}_N$ se escala por $V$:"
+        )
         st.latex(
             r"\text{SE}_I = V \cdot \frac{S}{\sqrt{N}}"
             rf"\quad \Rightarrow \quad \text{{SE}}_I = {stats['V']:.6g}"
@@ -655,41 +729,59 @@ def run():
 
         if sol["error"]:
             st.warning(
-                f"No se pudo obtener una solución analítica: {sol['error']}  \n"
-                "La función no tiene primitiva en forma cerrada con los métodos "
-                "simbólicos disponibles."
+                f"No se pudo obtener una solución analítica: {sol['error']}"
             )
         else:
             if dim == 1:
-                # Paso 1: primitiva
-                st.markdown("**Paso 1 — Primitiva indefinida**")
-                st.markdown(
-                    "Aplicamos el Teorema Fundamental del Cálculo: buscamos "
-                    r"$F(x)$ tal que $F'(x) = f(x)$."
-                )
-                st.latex(
-                    rf"\int {sol['expr']} \, dx = {sol['F']} + C"
-                )
+                if sol["show_steps"]:
+                    # Paso 1: primitiva
+                    st.markdown("**Paso 1 — Primitiva indefinida**")
+                    st.markdown(
+                        "Aplicamos el Teorema Fundamental del Cálculo: buscamos "
+                        r"$F(x)$ tal que $F'(x) = f(x)$."
+                    )
+                    st.latex(
+                        rf"\int {sol['expr']} \, dx = {sol['F']} + C"
+                    )
 
-                # Paso 2: Regla de Barrow
-                st.markdown("**Paso 2 — Regla de Barrow**")
-                st.markdown(
-                    "Evaluamos la primitiva en los límites y restamos:"
-                )
-                st.latex(
-                    rf"\int_{{{sol['a_sym']}}}^{{{sol['b_sym']}}} {sol['expr']} \, dx"
-                    rf"= F({sol['b_sym']}) - F({sol['a_sym']})"
-                )
-                st.latex(
-                    rf"= \left({sol['F_at_b']}\right)"
-                    rf"- \left({sol['F_at_a']}\right)"
-                )
+                    # Paso 2: Regla de Barrow
+                    st.markdown("**Paso 2 — Regla de Barrow**")
+                    st.markdown(
+                        "Evaluamos la primitiva en los límites y restamos:"
+                    )
+                    st.latex(
+                        rf"\int_{{{sol['a_sym']}}}^{{{sol['b_sym']}}} {sol['expr']} \, dx"
+                        rf"= F({sol['b_sym']}) - F({sol['a_sym']})"
+                    )
+                    st.latex(
+                        rf"= \left({sol['F_at_b']}\right)"
+                        rf"- \left({sol['F_at_a']}\right)"
+                    )
 
-                # Paso 3: resultado exacto
-                st.markdown("**Paso 3 — Resultado exacto**")
-                st.latex(
-                    rf"I_{{exacta}} = {sol['result_sym']} = {sol['result_num']:.10f}"
-                )
+                    # Paso 3: resultado exacto
+                    st.markdown("**Paso 3 — Resultado exacto**")
+                    st.latex(
+                        rf"I_{{exacta}} = {sol['result_sym']} = {sol['result_num']:.10f}"
+                    )
+                else:
+                    # f(x) tiene una primitiva discontinua en [a, b]: no mostramos
+                    # los pasos de Barrow porque serian enganosos. Vamos directo
+                    # al resultado, obtenido por integracion definida directa.
+                    st.info(
+                        "La primitiva de $f(x)$ no es continua en todo el intervalo "
+                        "$[a, b]$ (suele pasar cuando hay una asíntota o "
+                        "discontinuidad dentro del intervalo), así que la regla de "
+                        "Barrow simple no es aplicable. SymPy resolvió la integral "
+                        "definida directamente:"
+                    )
+                    st.latex(
+                        rf"\int_{{{sol['a_sym']}}}^{{{sol['b_sym']}}} {sol['expr']} \, dx"
+                        rf"= {sol['result_sym']}"
+                    )
+                    st.markdown("**Resultado exacto**")
+                    st.latex(
+                        rf"I_{{exacta}} = {sol['result_sym']} = {sol['result_num']:.10f}"
+                    )
 
             else:
                 # Paso 1: integral interior
