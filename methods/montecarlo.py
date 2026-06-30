@@ -415,6 +415,52 @@ def run():
     </style>
     """, unsafe_allow_html=True)
 
+    with st.expander("📘 Teoría: ¿Qué es el Método de Monte Carlo?", expanded=False):
+                st.markdown(r"""
+        ### ¿Qué es?
+
+        El **Método de Monte Carlo** es una técnica numérica estocástica (basada en el uso de números aleatorios) que se utiliza para aproximar expresiones matemáticas complejas. En el cálculo, lo empleamos principalmente para **aproximar el valor de integrales definidas**.
+
+        A diferencia de métodos numéricos tradicionales (como la regla del trapecio o la bisección que vimos para raíces), que son deterministas y usan grillas espaciadas de forma regular, Monte Carlo recurre al muestreo probabilístico.
+
+        Una de sus mayores ventajas es que **puede usarse tanto para derivadas e integrales simples (cálculo de áreas en 1D) como para integrales dobles o múltiples (volúmenes en 2D, 3D y más)**, siendo de hecho el método más eficiente cuando la cantidad de dimensiones aumenta drásticamente.
+        """)
+
+                st.markdown("### ¿Cómo funciona el algoritmo?")
+                st.markdown(r"""
+        El principio subyacente es la Ley de los Grandes Números. Básicamente, calculamos el "valor promedio" de la función dentro del dominio y lo multiplicamos por el tamaño total de ese dominio.
+
+        1. **Definir el dominio:** Determinar el área o volumen donde vamos a integrar. Por ejemplo, el intervalo $[a, b]$ para una integral simple, o un rectángulo de integración para una integral doble.
+        2. **Generar $N$ puntos aleatorios:** Se generan coordenadas al azar con distribución uniforme dentro del dominio definido.
+        3. **Evaluar la función:** Se calcula $f(x)$ (o $f(x, y)$ en integrales dobles) para cada uno de los $N$ puntos generados.
+        4. **Calcular el promedio muestral:** Se suman todas las evaluaciones y se dividen por $N$.
+        5. **Multiplicar por el tamaño del dominio:** Se multiplica el promedio por la longitud (en 1D), área (en 2D) o volumen del dominio.
+        """)
+
+                st.markdown("### Análisis Estadístico y Fórmulas")
+                st.markdown(r"""
+        Si llamamos $V$ al "volumen" del dominio de integración (donde $V = b - a$ en una integral simple), la integral $I$ se aproxima con la siguiente fórmula:
+        """)
+                st.latex(r"I \approx V \cdot \frac{1}{N} \sum_{i=1}^{N} f(x_i)")
+
+                st.markdown(r"""
+        Como dependemos de números pseudoaleatorios, cada ejecución de la simulación arrojará un resultado ligeramente diferente. Para analizar la fiabilidad de nuestra aproximación, aplicamos estadística sobre la muestra de puntos evaluados:
+
+        **1. Desvío Estándar Muestral ($S$):** Nos indica cuánta dispersión hay entre los valores de la función evaluada y su promedio ($\bar{f}$).
+        """)
+                st.latex(r"S = \sqrt{\frac{1}{N-1} \sum_{i=1}^{N} (f(x_i) - \bar{f})^2}")
+
+                st.markdown(r"""
+        **2. Error Estándar ($SE$):**
+        Es la métrica crucial de Monte Carlo. Cuantifica la incertidumbre de nuestra aproximación final respecto al valor real teórico de la integral.
+        """)
+                st.latex(r"SE = V \cdot \frac{S}{\sqrt{N}}")
+
+                st.markdown(r"""
+        > **💡 Sobre el comportamiento del Error:**
+        > Al observar la fórmula del Error Estándar, notamos que el término $\sqrt{N}$ está en el denominador. La convergencia de Monte Carlo es del orden de $\mathcal{O}(1/\sqrt{N})$. Esto significa que **para reducir el error a la mitad, no basta con duplicar los puntos: es necesario cuadruplicar el tamaño de la muestra ($4N$)**.
+        """)
+
     st.title("Integración por Monte Carlo")
 
     # ── Dimensiones ──────────────────────────────────────────────────────────
@@ -874,3 +920,45 @@ def run():
                 f'<span class="{within_class}">{within_msg}</span>',
                 unsafe_allow_html=True,
             )
+
+        # ── Relación entre el Error y N (NUEVO APARTADO) ─────────────────────
+        st.markdown("---")
+        st.subheader("Relación entre el Error y el Tamaño de Muestra (N)")
+
+        st.markdown(
+            "Como observamos en el análisis estadístico, el error estándar del "
+            "método de Monte Carlo sigue una relación inversamente proporcional a "
+            "la raíz cuadrada del tamaño de la muestra ($N$):"
+        )
+        st.latex(r"\text{Error} \propto \frac{1}{\sqrt{N}}")
+
+        st.markdown("**¿Qué se necesita para reducir el error a la mitad?**")
+        st.markdown(
+            "Asumiendo que la varianza muestral ($S^2$) se mantiene constante, "
+            "si queremos que el nuevo error ($E_2$) sea exactamente la mitad del "
+            "error actual ($E_1$), la demostración matemática es la siguiente:"
+        )
+
+        # Paso 1
+        st.latex(r"E_1 = \frac{C}{\sqrt{N_1}} \quad \text{donde } C = V \cdot S")
+        st.latex(r"E_2 = \frac{E_1}{2} = \frac{1}{2} \left( \frac{C}{\sqrt{N_1}} \right)")
+
+        # Paso 2
+        st.markdown("Planteamos la ecuación para hallar el nuevo tamaño de muestra $N_2$:")
+        st.latex(r"\frac{C}{\sqrt{N_2}} = \frac{C}{2\sqrt{N_1}}")
+
+        # Paso 3
+        st.markdown("Simplificamos la constante $C$ en ambos lados e invertimos:")
+        st.latex(r"\sqrt{N_2} = 2\sqrt{N_1}")
+
+        # Paso 4
+        st.markdown("Por último, elevamos al cuadrado ambos términos para despejar $N_2$:")
+        st.latex(r"N_2 = (2\sqrt{N_1})^2 = 4N_1")
+
+        new_n = 4 * n
+        st.markdown(
+            f"**Conclusión:** Para reducir el error a la mitad, la matemática demuestra "
+            f"que siempre es necesario **cuadruplicar** el tamaño de la muestra. "
+            f"Partiendo de tu muestra actual $N_1 = {n}$, el nuevo valor debería ser:"
+        )
+        st.latex(rf"N_2 = 4 \times {n} = {new_n}")
