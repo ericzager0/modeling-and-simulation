@@ -86,8 +86,8 @@ def _integral_latex_2d(latex_expr: str, ax: float, bx: float,
 
 def _montecarlo_1d(f, a: float, b: float,
                    n: int, tol: float, z: float, seed: int):
-    rng = np.random.default_rng(seed)
-    xs = rng.uniform(a, b, n)
+    np.random.seed(seed)
+    xs = np.random.uniform(a, b, n)
     ys = f(xs).astype(float)
 
     V = b - a                        # volumen (longitud) del intervalo
@@ -118,9 +118,9 @@ def _montecarlo_1d(f, a: float, b: float,
 
 def _montecarlo_2d(f, ax: float, bx: float, ay: float, by: float,
                    n: int, tol: float, z: float, seed: int):
-    rng = np.random.default_rng(seed)
-    xs = rng.uniform(ax, bx, n)
-    ys_pts = rng.uniform(ay, by, n)
+    np.random.seed(seed)
+    xs = np.random.uniform(ax, bx, n)
+    ys_pts = np.random.uniform(ay, by, n)
     zs = f(xs, ys_pts).astype(float)
 
     V = (bx - ax) * (by - ay)
