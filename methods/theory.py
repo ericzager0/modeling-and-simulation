@@ -553,108 +553,123 @@ def _comparativa_metodos():
     st.header("Bisección vs. Punto Fijo vs. Aitken vs. Newton-Raphson")
 
     st.markdown("""
-    Los cuatro métodos persiguen el mismo objetivo — aproximar una raíz
-    de $f(x)=0$ — pero difieren mucho en **qué tan rápido llegan**,
-    **qué tan exigentes son para arrancar**, y **qué tan fácil es
-    aplicarlos a mano**. Esta sección los compara a nivel teórico, sin
-    entrar en el funcionamiento interno de cada uno.
+    Los cuatro métodos, **si convergen**, llegan a la misma raíz. Lo que
+    los diferencia es **qué tan rápido llegan**, **qué tan exigentes son
+    para arrancar**, y **qué tan fácil es plantearlos**.
     """)
 
     st.divider()
 
     # ── Tabla comparativa ────────────────────────────────────────────────────
-    st.subheader("Tabla comparativa")
+    st.subheader("Resumen")
 
     st.markdown("""
-    | Criterio | Bisección | Punto Fijo | Aitken | Newton-Raphson |
-    |---|---|---|---|---|
-    | **Velocidad de convergencia** | Lineal (lenta) | Lineal | Acelerada (cuasi-cuadrática) | Cuadrática (rápida) |
-    | **Precisión por iteración** | El error se reduce a la mitad cada vez | Depende de \\|g'(x)\\|, puede ser lenta | Mejora notablemente sobre Punto Fijo | Duplica las cifras correctas en cada paso (cerca de la raíz) |
-    | **Dificultad para plantear** | Baja — solo necesita $f$ continua | Media-alta — hay que hallar y validar $g(x)$ | Media-alta — depende de tener una $g(x)$ válida | Media — requiere calcular $f'(x)$ |
-    | **Requisito de partida** | Intervalo $[a,b]$ con cambio de signo (Bolzano) | Semilla $x_0$ + $g(x)$ con \\|g'(x_0)\\|<1 | Semilla $x_0$ + $g(x)$ con \\|g'(x_0)\\|<1 | Semilla $x_0$ + $f'(x_0)\\neq 0$ |
-    | **Garantía de convergencia** | Siempre converge si se cumple Bolzano | Solo si $g$ es contracción cerca de $x_0$ | Misma exigencia que Punto Fijo | No garantizada; depende de $x_0$ y la forma de $f$ |
-    | **Riesgo de fallar** | Muy bajo | Medio (mala elección de $g$) | Medio (mismo riesgo que Punto Fijo) | Mayor (derivada nula, divergencia, oscilación) |
+    | | Bisección | Punto Fijo | Aitken | Newton-Raphson |
+    |---|:---:|:---:|:---:|:---:|
+    | **Velocidad** | 🐢 lenta | 🐢 lenta-media | 🐇 media-rápida | 🚀 rápida |
+    | **Orden de convergencia** | Lineal | Lineal | Superlineal | Cuadrática |
+    | **Dificultad** | 🟢 baja | 🟠 media-alta | 🟠 media-alta | 🟡 media |
+    | **Qué necesita para arrancar** | $[a,b]$ con Bolzano | $x_0$ + $g(x)$ válida | $x_0$ + $g(x)$ válida | $x_0$ + $f'(x_0)\\neq 0$ |
+    | **Garantía de convergencia** | Sí, si hay Bolzano | Solo si $\\|g'(x_0)\\|<1$ | Igual que Punto Fijo | No garantizada |
     """)
 
     st.divider()
 
     # ── Velocidad de convergencia ────────────────────────────────────────────
-    st.subheader("Velocidad de convergencia")
+    st.subheader("1. Velocidad de convergencia")
 
     st.markdown("""
-    - **Bisección**: la más lenta de las cuatro. El error se reduce
-      siempre a la mitad en cada paso, sin importar qué tan "buena" sea
-      la función — es un ritmo constante y predecible, pero conservador.
-    - **Punto Fijo**: también lineal, pero la velocidad depende
-      directamente de qué tan chico sea $|g'(x_0)|$. Cuanto más cerca
-      de 0, más rápido converge; cuanto más cerca de 1, más se demora.
-    - **Aitken**: toma los resultados de Punto Fijo y los acelera
-      matemáticamente (extrapolación), logrando un orden de convergencia
-      mayor sin necesitar más información que la que ya usaba Punto Fijo.
-    - **Newton-Raphson**: el más rápido cuando funciona bien — su
-      convergencia es cuadrática, lo que en la práctica significa que la
-      cantidad de cifras decimales correctas se **duplica** en cada
-      iteración una vez que está cerca de la raíz.
+    Es el criterio que más las distingue. De más lenta a más rápida:
+    """)
+
+    st.markdown("""
+    <div class="result-cards">
+        <div class="result-card" style="border-top: 3px solid #dc2626;">
+            <div class="rc-label">Bisección</div>
+            <div class="rc-value">Lineal</div>
+            <div class="rc-sub">error ÷ 2 en cada paso, siempre igual</div>
+        </div>
+        <div class="result-card" style="border-top: 3px solid #d97706;">
+            <div class="rc-label">Punto Fijo</div>
+            <div class="rc-value">Lineal</div>
+            <div class="rc-sub">depende de |g'(x₀)|</div>
+        </div>
+        <div class="result-card" style="border-top: 3px solid #2563eb;">
+            <div class="rc-label">Aitken</div>
+            <div class="rc-value">Superlineal</div>
+            <div class="rc-sub">acelera a Punto Fijo</div>
+        </div>
+        <div class="result-card" style="border-top: 3px solid #16a34a;">
+            <div class="rc-label">Newton-Raphson</div>
+            <div class="rc-value">Cuadrática</div>
+            <div class="rc-sub">cifras correctas se duplican</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    - **Bisección**: el error se parte a la mitad en cada iteración,
+      sin importar la función. Ritmo fijo y predecible, pero conservador.
+    - **Punto Fijo**: también lineal, pero la velocidad **no es fija**:
+      cuanto más chico sea $|g'(x_0)|$, más rápido converge; cerca de 1,
+      se vuelve casi tan lento como Bisección.
+    - **Aitken**: toma la misma sucesión de Punto Fijo y la acelera por
+      extrapolación (Δ²), sin pedir información extra.
+    - **Newton-Raphson**: la más rápida cuando funciona — cerca de la
+      raíz, la cantidad de cifras decimales correctas se **duplica**
+      en cada paso.
     """)
 
     st.divider()
 
     # ── Precision ─────────────────────────────────────────────────────────────
-    st.subheader("Precisión alcanzada")
+    st.subheader("2. Precisión: cuántas iteraciones hacen falta")
 
-    st.markdown("""
-    Los cuatro métodos, **si convergen**, llegan al mismo resultado: la
-    raíz real de $f(x)$, dentro de la tolerancia que se haya fijado. La
-    diferencia no está en "qué tan precisos son" en el límite, sino en
-    **cuántas iteraciones hacen falta** para alcanzar una tolerancia
-    dada:
+    st.info("""
+    **Ojo con la palabra "precisión":** los cuatro métodos, si convergen,
+    llegan a la **misma raíz exacta** (dentro de la tolerancia pedida).
+    Ninguno es "más preciso" que otro en el resultado final — la
+    diferencia real es **cuántas iteraciones** consume cada uno para
+    llegar a esa tolerancia.
     """)
 
     st.markdown("""
-    - Bisección necesita muchas más iteraciones que el resto para la
-      misma cantidad de cifras de precisión.
-    - Punto Fijo varía mucho según la $g(x)$ elegida — puede ser casi
+    - **Bisección** necesita, por lejos, más iteraciones que el resto
+      para el mismo número de cifras.
+    - **Punto Fijo** varía mucho según la $g(x)$ elegida: puede ser casi
       tan lento como Bisección, o razonablemente rápido.
-    - Aitken típicamente recorta a la mitad (o menos) las iteraciones
-      que necesitaría Punto Fijo solo.
-    - Newton-Raphson suele ser el que llega primero a una tolerancia
-      ajustada, salvo que la semilla esté mal elegida.
+    - **Aitken** típicamente recorta a la mitad (o menos) las
+      iteraciones que Punto Fijo necesitaría solo.
+    - **Newton-Raphson** suele llegar primero a una tolerancia exigente,
+      salvo que la semilla esté mal elegida.
     """)
 
     st.divider()
 
     # ── Dificultad ────────────────────────────────────────────────────────────
-    st.subheader("Dificultad de aplicación")
+    st.subheader("3. Dificultad de aplicación")
 
     st.markdown("""
-    - **Bisección** es la más simple de plantear: alcanza con verificar
-      Bolzano en un intervalo. No requiere derivar nada ni despejar $x$.
-    - **Punto Fijo** y **Aitken** comparten la mayor dificultad inicial:
-      hay que **encontrar** una $g(x)$ adecuada despejando $f(x)=0$, y
-      **verificar** que cumpla la condición de convergencia
-      ($|g'(x_0)|<1$) antes de poder iterar con confianza.
-    - **Newton-Raphson** tiene una dificultad intermedia: no hace falta
-      despejar nada, pero sí calcular $f'(x)$ (lo cual puede complicarse
-      si $f$ es una expresión larga) y elegir una semilla donde
-      $f'(x_0)\\neq 0$.
+    - **Bisección** — la más simple: solo hay que verificar Bolzano en
+      un intervalo. No se deriva ni se despeja nada.
+    - **Newton-Raphson** — dificultad media: no hay que despejar $x$,
+      pero sí calcular $f'(x)$ y elegir una semilla con $f'(x_0)\\neq 0$.
+    - **Punto Fijo y Aitken** — las más laboriosas para arrancar: hay
+      que **encontrar** una $g(x)$ despejando $f(x)=0$ y **verificar**
+      que sea una contracción ($|g'(x_0)|<1$) antes de poder confiar en
+      la iteración. *(Ver la sección "Construcción de g(x)" para el
+      procedimiento completo.)*
     """)
 
     st.divider()
 
-    # ── Cuando usar cada uno ─────────────────────────────────────────────────
-    st.subheader("Cuándo conviene cada uno")
-
-    st.markdown("""
-    - **Bisección**: cuando se prioriza la seguridad de que el método
-      no va a fallar, y la cantidad de iteraciones no es un problema.
-    - **Punto Fijo**: cuando ya se cuenta con (o es fácil obtener) una
-      $g(x)$ que cumple la condición de convergencia, y se prefiere
-      evitar el cálculo de derivadas de $f$.
-    - **Aitken**: cuando ya se va a usar Punto Fijo y se quiere acelerar
-      sin cambiar de método ni agregar requisitos nuevos.
-    - **Newton-Raphson**: cuando se necesita la convergencia más rápida
-      posible y calcular $f'(x)$ no representa un problema, asumiendo
-      una semilla razonablemente cercana a la raíz.
+    st.subheader("En una frase")
+    st.success("""
+    **Bisección** es la más segura pero la más lenta. **Newton-Raphson**
+    es la más rápida pero no garantiza convergencia. **Punto Fijo** y
+    **Aitken** quedan en el medio: exigen más trabajo previo (hallar y
+    validar $g(x)$), y Aitken simplemente acelera lo que Punto Fijo ya
+    hace.
     """)
 
 
