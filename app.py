@@ -13,7 +13,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-PAGINAS = ["Teoría", "Bisección", "Punto Fijo", "Aitken", "Newton-Raphson", "Lagrange", "Diferencias Finitas", "Newton-Cotes", "Montecarlo", "EDOs"]
+PAGINAS = ["Teoría", "Bisección", "Punto Fijo", "Aitken", "Newton-Raphson", "Lagrange", "Diferencias Finitas", "Newton-Cotes", "Montecarlo", "EDOs", "Cheats"]
 
 with st.sidebar:
     pagina = st.radio("Navegación", PAGINAS, label_visibility="collapsed")
@@ -58,4 +58,8 @@ elif pagina == "Montecarlo":
 
 elif pagina == "EDOs":
     from methods.edo import run
+    run()
+
+elif pagina == "Cheats":
+    from methods.cheats import run
     run()
