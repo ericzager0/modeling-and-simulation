@@ -1,8 +1,11 @@
+from importlib import import_module
+
 import streamlit as st
 
 st.set_page_config(page_title="Simulador Numérico", layout="wide")
 
-st.markdown("""
+st.markdown(
+    """
     <style>
     [data-baseweb="radio"] {
         padding: 8px 0px !important;
@@ -11,55 +14,39 @@ st.markdown("""
         font-size: 18px !important;
     }
     </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
-PAGINAS = ["Teoría", "Bisección", "Punto Fijo", "Aitken", "Newton-Raphson", "Lagrange", "Diferencias Finitas", "Newton-Cotes", "Montecarlo", "EDOs", "Cheats"]
+PAGINAS = [
+    "Teoría",
+    "Bisección",
+    "Punto Fijo",
+    "Aitken",
+    "Newton-Raphson",
+    "Lagrange",
+    "Diferencias Finitas",
+    "Newton-Cotes",
+    "Montecarlo",
+    "EDOs",
+    "Cheats",
+]
+
+MODULOS = {
+    "Teoría": "methods.theory",
+    "Bisección": "methods.bisection",
+    "Punto Fijo": "methods.fixed_point",
+    "Aitken": "methods.aitken",
+    "Newton-Raphson": "methods.newton_raphson",
+    "Lagrange": "methods.lagrange",
+    "Diferencias Finitas": "methods.finite_differences",
+    "Newton-Cotes": "methods.newton_cotes",
+    "Montecarlo": "methods.montecarlo",
+    "EDOs": "methods.edo",
+    "Cheats": "methods.cheats",
+}
 
 with st.sidebar:
     pagina = st.radio("Navegación", PAGINAS, label_visibility="collapsed")
 
-if pagina == "Teoría":
-    from methods.theory import run
-    run()
-
-elif pagina == "Bisección":
-    from methods.bisection import run
-    run()
-
-elif pagina == "Punto Fijo":
-    from methods.fixed_point import run
-    run()
-
-elif pagina == "Aitken":
-    from methods.aitken import run
-    run()
-
-elif pagina == "Newton-Raphson":
-    from methods.newton_raphson import run
-    run()
-
-elif pagina == "Lagrange":
-    from methods.lagrange import run
-    run()
-
-elif pagina == "Diferencias Finitas":
-    from methods.finite_differences import run
-    run()
-
-elif pagina == "Newton-Cotes":
-    from methods.newton_cotes import run
-    run()
-
-# Corregir que en newton cotes al entrar x**x no me dice que uso indeterminacion. y al entrar cos(x)/x muestra inf y no el valor.
-
-elif pagina == "Montecarlo":
-    from methods.montecarlo import run
-    run()
-
-elif pagina == "EDOs":
-    from methods.edo import run
-    run()
-
-elif pagina == "Cheats":
-    from methods.cheats import run
-    run()
+import_module(MODULOS[pagina]).run()
