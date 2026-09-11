@@ -56,28 +56,28 @@ def _parse_expr_1d(func_str: str):
     x, ld = _local_dict_1d()
     expr = sp.sympify(func_str.replace("^", "**"), locals=ld)
     f = sp.lambdify(x, expr, modules=["numpy"])
-    return f, sp.latex(expr), expr
+    return f, sp.latex(expr, ln_notation=True), expr
 
 
 def _parse_expr_2d(func_str: str):
     x, y, ld = _local_dict_2d()
     expr = sp.sympify(func_str.replace("^", "**"), locals=ld)
     f = sp.lambdify((x, y), expr, modules=["numpy"])
-    return f, sp.latex(expr), expr
+    return f, sp.latex(expr, ln_notation=True), expr
 
 
 def _integral_latex_1d(latex_expr: str, a: float, b: float) -> str:
-    a_str = sp.latex(sp.nsimplify(a, rational=True))
-    b_str = sp.latex(sp.nsimplify(b, rational=True))
+    a_str = sp.latex(sp.nsimplify(a, rational=True), ln_notation=True)
+    b_str = sp.latex(sp.nsimplify(b, rational=True), ln_notation=True)
     return rf"\int_{{{a_str}}}^{{{b_str}}} {latex_expr} \, dx"
 
 
 def _integral_latex_2d(latex_expr: str, ax: float, bx: float,
                        ay: float, by: float) -> str:
-    ax_s = sp.latex(sp.nsimplify(ax, rational=True))
-    bx_s = sp.latex(sp.nsimplify(bx, rational=True))
-    ay_s = sp.latex(sp.nsimplify(ay, rational=True))
-    by_s = sp.latex(sp.nsimplify(by, rational=True))
+    ax_s = sp.latex(sp.nsimplify(ax, rational=True), ln_notation=True)
+    bx_s = sp.latex(sp.nsimplify(bx, rational=True), ln_notation=True)
+    ay_s = sp.latex(sp.nsimplify(ay, rational=True), ln_notation=True)
+    by_s = sp.latex(sp.nsimplify(by, rational=True), ln_notation=True)
     return (
         rf"\int_{{{ay_s}}}^{{{by_s}}} \int_{{{ax_s}}}^{{{bx_s}}} "
         rf"{latex_expr} \, dx \, dy"
@@ -168,7 +168,7 @@ def _has_nonelementary(expr) -> bool:
 
 def _num_latex(expr) -> str:
     """Devuelve el valor numerico de expr como string LaTeX limpio."""
-    return sp.latex(expr.evalf(10))
+    return sp.latex(expr.evalf(10), ln_notation=True)
 
 
 def _classify_term(term, var):
@@ -192,7 +192,7 @@ def _classify_term(term, var):
         if g == 1:
             return {
                 "regla":   "Integral de una constante",
-                "formula": r"\int k \, d" + sp.latex(var) + r" = k \," + sp.latex(var),
+                "formula": r"\int k \, d" + sp.latex(var, ln_notation=True) + r" = k \," + sp.latex(var, ln_notation=True),
                 "antider": term * var,
             }
 
@@ -201,15 +201,15 @@ def _classify_term(term, var):
             n = g.exp
             if sp.simplify(n + 1) == 0:
                 return {
-                    "regla":   "Integral de 1/" + sp.latex(var) + " (logaritmo natural)",
-                    "formula": r"\int \frac{1}{" + sp.latex(var) + r"}\, d" + sp.latex(var)
-                               + r" = \ln\left|" + sp.latex(var) + r"\right|",
+                    "regla":   "Integral de 1/" + sp.latex(var, ln_notation=True) + " (logaritmo natural)",
+                    "formula": r"\int \frac{1}{" + sp.latex(var, ln_notation=True) + r"}\, d" + sp.latex(var, ln_notation=True)
+                               + r" = \ln\left|" + sp.latex(var, ln_notation=True) + r"\right|",
                     "antider": c * sp.log(sp.Abs(var)),
                 }
             return {
                 "regla":   "Regla de la potencia",
-                "formula": r"\int " + sp.latex(var) + r"^n \, d" + sp.latex(var)
-                           + r" = \frac{" + sp.latex(var) + r"^{n+1}}{n+1} \quad (n \neq -1)",
+                "formula": r"\int " + sp.latex(var, ln_notation=True) + r"^n \, d" + sp.latex(var, ln_notation=True)
+                           + r" = \frac{" + sp.latex(var, ln_notation=True) + r"^{n+1}}{n+1} \quad (n \neq -1)",
                 "antider": c * var ** (n + 1) / (n + 1),
             }
 
@@ -217,8 +217,8 @@ def _classify_term(term, var):
         if g == var:
             return {
                 "regla":   "Regla de la potencia",
-                "formula": r"\int " + sp.latex(var) + r"\, d" + sp.latex(var)
-                           + r" = \frac{" + sp.latex(var) + r"^2}{2}",
+                "formula": r"\int " + sp.latex(var, ln_notation=True) + r"\, d" + sp.latex(var, ln_notation=True)
+                           + r" = \frac{" + sp.latex(var, ln_notation=True) + r"^2}{2}",
                 "antider": c * var ** 2 / 2,
             }
 
@@ -230,14 +230,14 @@ def _classify_term(term, var):
                 if k == 1:
                     return {
                         "regla":   "Integral exponencial",
-                        "formula": r"\int e^{" + sp.latex(var) + r"}\, d" + sp.latex(var)
-                                   + r" = e^{" + sp.latex(var) + r"}",
+                        "formula": r"\int e^{" + sp.latex(var, ln_notation=True) + r"}\, d" + sp.latex(var, ln_notation=True)
+                                   + r" = e^{" + sp.latex(var, ln_notation=True) + r"}",
                         "antider": c * sp.exp(arg),
                     }
                 return {
                     "regla":   "Integral exponencial (regla de la cadena)",
-                    "formula": r"\int e^{k\," + sp.latex(var) + r"}\, d" + sp.latex(var)
-                               + r" = \frac{e^{k\," + sp.latex(var) + r"}}{k}",
+                    "formula": r"\int e^{k\," + sp.latex(var, ln_notation=True) + r"}\, d" + sp.latex(var, ln_notation=True)
+                               + r" = \frac{e^{k\," + sp.latex(var, ln_notation=True) + r"}}{k}",
                     "antider": c * sp.exp(arg) / k,
                 }
 
@@ -245,9 +245,9 @@ def _classify_term(term, var):
         if g.is_Pow and not g.base.has(var) and g.exp == var:
             base = g.base
             return {
-                "regla":   "Integral exponencial de base " + sp.latex(base),
-                "formula": r"\int a^{" + sp.latex(var) + r"}\, d" + sp.latex(var)
-                           + r" = \frac{a^{" + sp.latex(var) + r"}}{\ln a}",
+                "regla":   "Integral exponencial de base " + sp.latex(base, ln_notation=True),
+                "formula": r"\int a^{" + sp.latex(var, ln_notation=True) + r"}\, d" + sp.latex(var, ln_notation=True)
+                           + r" = \frac{a^{" + sp.latex(var, ln_notation=True) + r"}}{\ln a}",
                 "antider": c * g / sp.log(base),
             }
 
@@ -259,14 +259,14 @@ def _classify_term(term, var):
                 if k == 1:
                     return {
                         "regla":   "Integral de seno",
-                        "formula": r"\int \sin(" + sp.latex(var) + r")\, d" + sp.latex(var)
-                                   + r" = -\cos(" + sp.latex(var) + r")",
+                        "formula": r"\int \sin(" + sp.latex(var, ln_notation=True) + r")\, d" + sp.latex(var, ln_notation=True)
+                                   + r" = -\cos(" + sp.latex(var, ln_notation=True) + r")",
                         "antider": -c * sp.cos(arg),
                     }
                 return {
                     "regla":   "Integral de seno (regla de la cadena)",
-                    "formula": r"\int \sin(k\," + sp.latex(var) + r")\, d" + sp.latex(var)
-                               + r" = -\frac{\cos(k\," + sp.latex(var) + r")}{k}",
+                    "formula": r"\int \sin(k\," + sp.latex(var, ln_notation=True) + r")\, d" + sp.latex(var, ln_notation=True)
+                               + r" = -\frac{\cos(k\," + sp.latex(var, ln_notation=True) + r")}{k}",
                     "antider": -c * sp.cos(arg) / k,
                 }
 
@@ -278,14 +278,14 @@ def _classify_term(term, var):
                 if k == 1:
                     return {
                         "regla":   "Integral de coseno",
-                        "formula": r"\int \cos(" + sp.latex(var) + r")\, d" + sp.latex(var)
-                                   + r" = \sin(" + sp.latex(var) + r")",
+                        "formula": r"\int \cos(" + sp.latex(var, ln_notation=True) + r")\, d" + sp.latex(var, ln_notation=True)
+                                   + r" = \sin(" + sp.latex(var, ln_notation=True) + r")",
                         "antider": c * sp.sin(arg),
                     }
                 return {
                     "regla":   "Integral de coseno (regla de la cadena)",
-                    "formula": r"\int \cos(k\," + sp.latex(var) + r")\, d" + sp.latex(var)
-                               + r" = \frac{\sin(k\," + sp.latex(var) + r")}{k}",
+                    "formula": r"\int \cos(k\," + sp.latex(var, ln_notation=True) + r")\, d" + sp.latex(var, ln_notation=True)
+                               + r" = \frac{\sin(k\," + sp.latex(var, ln_notation=True) + r")}{k}",
                     "antider": c * sp.sin(arg) / k,
                 }
 
@@ -293,8 +293,8 @@ def _classify_term(term, var):
         if isinstance(g, sp.tan) and g.args[0] == var:
             return {
                 "regla":   "Integral de tangente",
-                "formula": r"\int \tan(" + sp.latex(var) + r")\, d" + sp.latex(var)
-                           + r" = -\ln\left|\cos(" + sp.latex(var) + r")\right|",
+                "formula": r"\int \tan(" + sp.latex(var, ln_notation=True) + r")\, d" + sp.latex(var, ln_notation=True)
+                           + r" = -\ln\left|\cos(" + sp.latex(var, ln_notation=True) + r")\right|",
                 "antider": -c * sp.log(sp.Abs(sp.cos(var))),
             }
 
@@ -322,10 +322,10 @@ def _term_steps(expr, var):
     for term in terms:
         info = _classify_term(term, var)
         steps.append({
-            "term_latex":   sp.latex(term),
-            "regla":        info["regla"],
-            "formula":      info["formula"],
-            "antider_latex": sp.latex(info["antider"]),
+            "term_latex":    sp.latex(term, ln_notation=True),
+            "regla":         info["regla"],
+            "formula":       info["formula"],
+            "antider_latex": sp.latex(info["antider"], ln_notation=True),
         })
     return steps, len(terms) > 1
 
@@ -370,7 +370,7 @@ def _solve_analytical_1d(func_str: str, a: float, b: float):
         return {
             "error": (
                 f"La integral no converge a un valor real finito en el intervalo "
-                f"[{a}, {b}] (SymPy obtuvo: {sp.latex(result_sym)}). Es probable que "
+                f"[{a}, {b}] (SymPy obtuvo: {sp.latex(result_sym, ln_notation=True)}). Es probable que "
                 "f(x) tenga una asintota, polo o discontinuidad dentro del intervalo "
                 "de integracion."
             )
@@ -420,30 +420,30 @@ def _solve_analytical_1d(func_str: str, a: float, b: float):
         # simplificar/evaluar, para mostrar el paso intermedio.
         F_b_raw = F.subs(x, b_sym, simultaneous=True)
         F_a_raw = F.subs(x, a_sym, simultaneous=True)
-        F_b_raw_latex = _num_latex(F_b_raw) if _has_nonelementary(F_b_raw) else sp.latex(F_b_raw, mul_symbol="dot")
-        F_a_raw_latex = _num_latex(F_a_raw) if _has_nonelementary(F_a_raw) else sp.latex(F_a_raw, mul_symbol="dot")
+        F_b_raw_latex = _num_latex(F_b_raw) if _has_nonelementary(F_b_raw) else sp.latex(F_b_raw, mul_symbol="dot", ln_notation=True)
+        F_a_raw_latex = _num_latex(F_a_raw) if _has_nonelementary(F_a_raw) else sp.latex(F_a_raw, mul_symbol="dot", ln_notation=True)
 
     return {
-        "expr":       sp.latex(expr),
+        "expr":       sp.latex(expr, ln_notation=True),
         "show_steps": show_steps,
         "term_steps": term_steps,
         "lineal":     lineal,
-        "F":          (_num_latex(F)   if ne_F else sp.latex(F))   if show_steps else None,
-        "F_at_b":     (_num_latex(F_b) if ne_F else sp.latex(F_b)) if show_steps else None,
-        "F_at_a":     (_num_latex(F_a) if ne_F else sp.latex(F_a)) if show_steps else None,
+        "F":          (_num_latex(F)   if ne_F else sp.latex(F, ln_notation=True))   if show_steps else None,
+        "F_at_b":     (_num_latex(F_b) if ne_F else sp.latex(F_b, ln_notation=True)) if show_steps else None,
+        "F_at_a":     (_num_latex(F_a) if ne_F else sp.latex(F_a, ln_notation=True)) if show_steps else None,
         "F_b_raw":    F_b_raw_latex,
         "F_a_raw":    F_a_raw_latex,
-        "result_sym": _num_latex(result_sym) if ne_res else sp.latex(result_sym),
+        "result_sym": _num_latex(result_sym) if ne_res else sp.latex(result_sym, ln_notation=True),
         "result_num": result_num,
-        "a_sym":      sp.latex(a_sym),
-        "b_sym":      sp.latex(b_sym),
+        "a_sym":      sp.latex(a_sym, ln_notation=True),
+        "b_sym":      sp.latex(b_sym, ln_notation=True),
         "error":      None,
     }
 
 
 def _solve_analytical_2d(func_str: str,
-                          ax: float, bx: float,
-                          ay: float, by: float):
+                         ax: float, bx: float,
+                         ay: float, by: float):
     x, y, ld = _local_dict_2d()
     expr  = sp.sympify(func_str.replace("^", "**"), locals=ld)
     ax_s  = sp.nsimplify(ax, rational=True)
@@ -474,7 +474,7 @@ def _solve_analytical_2d(func_str: str,
         return {
             "error": (
                 f"La integral no converge a un valor real finito en el dominio "
-                f"dado (SymPy obtuvo: {sp.latex(result_sym)}). Es probable que "
+                f"dado (SymPy obtuvo: {sp.latex(result_sym, ln_notation=True)}). Es probable que "
                 "f(x, y) tenga una asintota o discontinuidad dentro del dominio."
             )
         }
@@ -498,18 +498,18 @@ def _solve_analytical_2d(func_str: str,
         y_term_steps, y_lineal = None, None
 
     return {
-        "expr":         sp.latex(expr),
-        "Fx":           _num_latex(Fx_simplified) if ne_x  else sp.latex(Fx_simplified),
+        "expr":         sp.latex(expr, ln_notation=True),
+        "Fx":           _num_latex(Fx_simplified) if ne_x  else sp.latex(Fx_simplified, ln_notation=True),
         "x_term_steps": x_term_steps,
         "x_lineal":     x_lineal,
         "y_term_steps": y_term_steps,
         "y_lineal":     y_lineal,
-        "result_sym":   _num_latex(result_sym)    if ne_res else sp.latex(result_sym),
+        "result_sym":   _num_latex(result_sym)    if ne_res else sp.latex(result_sym, ln_notation=True),
         "result_num":   result_num,
-        "ax_s":         sp.latex(ax_s),
-        "bx_s":         sp.latex(bx_s),
-        "ay_s":         sp.latex(ay_s),
-        "by_s":         sp.latex(by_s),
+        "ax_s":         sp.latex(ax_s, ln_notation=True),
+        "bx_s":         sp.latex(bx_s, ln_notation=True),
+        "ay_s":         sp.latex(ay_s, ln_notation=True),
+        "by_s":         sp.latex(by_s, ln_notation=True),
         "error":        None,
     }
 
