@@ -1,3 +1,4 @@
+import re
 import streamlit as st
 import sympy as sp
 import numpy as np
@@ -7,30 +8,71 @@ import numpy as np
 # Helpers de parseo
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _local_dict():
-    x = sp.Symbol("x")
-    return x, {
-        "x":    x,
-        "e":    sp.E,
-        "E":    sp.E,
-        "pi":   sp.pi,
-        "ln":   sp.log,
-        "log":  sp.log,
-        "exp":  sp.exp,
-        "sin":  sp.sin,
-        "cos":  sp.cos,
-        "tan":  sp.tan,
-        "sqrt": sp.sqrt,
-        "Abs":  sp.Abs,
-        "abs":  sp.Abs,
+def _log_func(*args):
+    """Interpreta log:
+    - log(x)       -> logaritmo decimal o en base 10
+    - log(x, base) -> logaritmo en la base indicada
+    """
+    if len(args) == 1:
+        return sp.log(args[0]) / sp.log(10)
+    return sp.log(args[0]) / sp.log(args[1])
+
+
+def _local_dict(x_sym=None):
+    if x_sym is None:
+        x_sym = sp.Symbol("x")
+    return x_sym, {
+        "x":     x_sym,
+        "e":     sp.E,
+        "E":     sp.E,
+        "pi":    sp.pi,
+        "ln":    sp.log,       # ln(x) -> logaritmo natural (base e)
+        "log":   _log_func,    # log(x) -> logaritmo decimal (base 10)
+        "log10": lambda arg: sp.log(arg) / sp.log(10),
+        "log2":  lambda arg: sp.log(arg) / sp.log(2),
+        "exp":   sp.exp,
+        "sin":   sp.sin,
+        "cos":   sp.cos,
+        "tan":   sp.tan,
+        "sqrt":  sp.sqrt,
+        "Abs":   sp.Abs,
+        "abs":   sp.Abs,
     }
+
+
+def _to_latex(expr) -> str:
+    r"""Convierte una expresión SymPy a LaTeX diferenciando claramente entre:
+    - ln(...)  -> logaritmo natural (\ln)
+    - log(...) -> logaritmo en base 10 (\log_{10}) o en la base especificada (\log_{b})
+    """
+    if expr is None:
+        return ""
+    try:
+        tex = sp.latex(expr, ln_notation=True)
+
+        def _repl_log(m):
+            prefix = m.group(1) or ""
+            arg = m.group(2) or m.group(3)
+            base = m.group(4) or m.group(5)
+            if base == "10":
+                return rf"{prefix}\log_{{10}}\left({arg}\right)"
+            return rf"{prefix}\log_{{{base}}}\left({arg}\right)"
+
+        tex = re.sub(
+            r"\\frac\{(.*?)\\ln(?:\{\\left\((.*?)\\right\)\}|\{(.*?)\})\}\{\\ln(?:\{\\left\(([0-9]+)\s*\\right\)\}|\{([0-9]+)\s*\})\}",
+            _repl_log,
+            tex,
+        )
+        return tex
+    except Exception:
+        return sp.latex(expr) if hasattr(expr, "free_symbols") else str(expr)
 
 
 def _parse_f(func_str: str):
     """Devuelve (expr_sympy, latex_str) o lanza excepción."""
     x, ld = _local_dict()
     expr = sp.sympify(func_str.replace("^", "**"), locals=ld)
-    return expr, sp.latex(expr)
+    return expr, _to_latex(expr)
 
 
 def _parse_number(num_str: str) -> float:
@@ -160,8 +202,8 @@ def _evaluar_candidatos(candidatos, x0: float, decimals: int = 6):
                     "estrategia": estrategia,
                     "g": g_simp,
                     "gp": gp,
-                    "latex_g": sp.latex(g_simp),
-                    "latex_gp": sp.latex(gp),
+                    "latex_g": _to_latex(g_simp),
+                    "latex_gp": _to_latex(gp),
                     "py_str": str(g_simp),
                     "gp_val": None,
                     "abs_gp": None,
@@ -211,8 +253,8 @@ def _evaluar_candidatos(candidatos, x0: float, decimals: int = 6):
                 "estrategia": estrategia,
                 "g": g_simp,
                 "gp": gp,
-                "latex_g": sp.latex(g_simp),
-                "latex_gp": sp.latex(gp),
+                "latex_g": _to_latex(g_simp),
+                "latex_gp": _to_latex(gp),
                 "py_str": str(g_simp),
                 "gp_val": gp_val if err_msg is None else None,
                 "abs_gp": abs_gp,
@@ -227,7 +269,7 @@ def _evaluar_candidatos(candidatos, x0: float, decimals: int = 6):
                 "estrategia": estrategia,
                 "g": g_simp,
                 "gp": None,
-                "latex_g": sp.latex(g_simp),
+                "latex_g": _to_latex(g_simp),
                 "latex_gp": "N/A",
                 "py_str": str(g_simp),
                 "gp_val": None,
@@ -370,7 +412,8 @@ $$|g'(x)| < 1$$
     func_str = col_fn.text_input(
         "f(x) — Función objetivo",
         value="x**3 - x - 1",
-        placeholder="Ej: x**3 - x - 1,  2*exp(x**2) - 5*x,  cos(x) - x",
+        placeholder="Ej: x**3 - x - 1,  2*exp(x**2) - 5*x,  ln(x) - 1,  log(x)",
+        help="ln(x) = logaritmo natural (base e) · log(x) = logaritmo decimal (base 10) · log(x, b) = base b",
     )
 
     x0_str = col_x0.text_input(

@@ -1,3 +1,4 @@
+import re
 import streamlit as st
 import sympy as sp
 import numpy as np
@@ -8,23 +9,64 @@ import plotly.graph_objects as go
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _local_dict():
-    x = sp.Symbol("x")
-    return x, {
-        "x":    x,
-        "e":    sp.E,
-        "E":    sp.E,
-        "pi":   sp.pi,
-        "ln":   sp.log,
-        "log":  sp.log,
-        "exp":  sp.exp,
-        "sin":  sp.sin,
-        "cos":  sp.cos,
-        "tan":  sp.tan,
-        "sqrt": sp.sqrt,
-        "Abs":  sp.Abs,
-        "abs":  sp.Abs,
+def _log_func(*args):
+    """Interpreta log:
+    - log(x)       -> logaritmo decimal o en base 10
+    - log(x, base) -> logaritmo en la base indicada
+    """
+    if len(args) == 1:
+        return sp.log(args[0]) / sp.log(10)
+    return sp.log(args[0]) / sp.log(args[1])
+
+
+def _local_dict(x_sym=None):
+    if x_sym is None:
+        x_sym = sp.Symbol("x")
+    return x_sym, {
+        "x":     x_sym,
+        "e":     sp.E,
+        "E":     sp.E,
+        "pi":    sp.pi,
+        "ln":    sp.log,       # ln(x) -> logaritmo natural (base e)
+        "log":   _log_func,    # log(x) -> logaritmo decimal (base 10)
+        "log10": lambda arg: sp.log(arg) / sp.log(10),
+        "log2":  lambda arg: sp.log(arg) / sp.log(2),
+        "exp":   sp.exp,
+        "sin":   sp.sin,
+        "cos":   sp.cos,
+        "tan":   sp.tan,
+        "sqrt":  sp.sqrt,
+        "Abs":   sp.Abs,
+        "abs":   sp.Abs,
     }
+
+
+def _to_latex(expr) -> str:
+    r"""Convierte una expresión SymPy a LaTeX diferenciando claramente entre:
+    - ln(...)  -> logaritmo natural (\ln)
+    - log(...) -> logaritmo en base 10 (\log_{10}) o en la base especificada (\log_{b})
+    """
+    if expr is None:
+        return ""
+    try:
+        tex = sp.latex(expr, ln_notation=True)
+
+        def _repl_log(m):
+            prefix = m.group(1) or ""
+            arg = m.group(2) or m.group(3)
+            base = m.group(4) or m.group(5)
+            if base == "10":
+                return rf"{prefix}\log_{{10}}\left({arg}\right)"
+            return rf"{prefix}\log_{{{base}}}\left({arg}\right)"
+
+        tex = re.sub(
+            r"\\frac\{(.*?)\\ln(?:\{\\left\((.*?)\\right\)\}|\{(.*?)\})\}\{\\ln(?:\{\\left\(([0-9]+)\s*\\right\)\}|\{([0-9]+)\s*\})\}",
+            _repl_log,
+            tex,
+        )
+        return tex
+    except Exception:
+        return sp.latex(expr) if hasattr(expr, "free_symbols") else str(expr)
 
 
 def _parse_f(func_str: str):
@@ -32,7 +74,7 @@ def _parse_f(func_str: str):
     x, ld = _local_dict()
     expr = sp.sympify(func_str.replace("^", "**"), locals=ld)
     f = sp.lambdify(x, expr, modules=["numpy"])
-    return f, expr, sp.latex(expr)
+    return f, expr, _to_latex(expr)
 
 
 def _fmt(v) -> str:
@@ -331,7 +373,8 @@ numérico y subestimó el verdadero máximo de la derivada.
     func_str = st.text_input(
         "f(x)  —  función original (opcional)",
         value="",
-        placeholder="Ej: sin(x),  exp(x),  x**3 - 2*x + 1",
+        placeholder="Ej: sin(x),  exp(x),  ln(x),  log(x),  x**3 - 2*x + 1",
+        help="ln(x) = logaritmo natural (base e) · log(x) = logaritmo decimal (base 10) · log(x, b) = base b",
     )
 
     f_func = f_expr = latex_f = None
@@ -810,7 +853,7 @@ numérico y subestimó el verdadero máximo de la derivada.
                     cota_calculada = cota
 
                     # ── Desarrollo visual ────────────────────────────────────────
-                    st.latex(rf"f^{{({deriv_order})}}(x) = {sp.latex(f_deriv_expr)}")
+                    st.latex(rf"f^{{({deriv_order})}}(x) = {_to_latex(f_deriv_expr)}")
                     st.latex(
                         rf"M_1 = \max_{{t\,\in\,[{_fmt(interval_lo)},\,{_fmt(interval_hi)}]}}"
                         rf"\left|f^{{({deriv_order})}}(t)\right|"
