@@ -6,6 +6,7 @@ from methods.cheats import run as run_cheats
 from methods.edo import run as run_edo
 from methods.finite_differences import run as run_finite_differences
 from methods.fixed_point import run as run_fixed_point
+from methods.gx_finder import run as run_gx_finder
 from methods.lagrange import run as run_lagrange
 from methods.montecarlo import run as run_montecarlo
 from methods.newton_cotes import run as run_newton_cotes
@@ -32,6 +33,7 @@ PAGINAS = [
     "Teoría",
     "Bisección",
     "Punto Fijo",
+    "Buscador g(x)",
     "Aitken",
     "Newton-Raphson",
     "Lagrange",
@@ -46,6 +48,7 @@ MODULOS = {
     "Teoría": run_theory,
     "Bisección": run_bisection,
     "Punto Fijo": run_fixed_point,
+    "Buscador g(x)": run_gx_finder,
     "Aitken": run_aitken,
     "Newton-Raphson": run_newton_raphson,
     "Lagrange": run_lagrange,

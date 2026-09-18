@@ -1,4 +1,5 @@
 import math
+import re
 import streamlit as st
 import sympy as sp
 import numpy as np
@@ -9,18 +10,73 @@ import plotly.graph_objects as go
 # Helpers de parseo y formato
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _log_func(*args):
+    """Interpreta log:
+    - log(x)       -> logaritmo decimal o en base 10
+    - log(x, base) -> logaritmo en la base indicada
+    """
+    if len(args) == 1:
+        return sp.log(args[0]) / sp.log(10)
+    return sp.log(args[0]) / sp.log(args[1])
+
+
+def _local_dict(x_sym=None):
+    ld = {
+        "e":     sp.E,
+        "E":     sp.E,
+        "pi":    sp.pi,
+        "ln":    sp.log,       # ln(x) -> logaritmo natural (base e)
+        "log":   _log_func,    # log(x) -> logaritmo en base 10 (decimal)
+        "log10": lambda arg: sp.log(arg) / sp.log(10),
+        "log2":  lambda arg: sp.log(arg) / sp.log(2),
+        "exp":   sp.exp,
+        "sin":   sp.sin,
+        "cos":   sp.cos,
+        "tan":   sp.tan,
+        "sqrt":  sp.sqrt,
+        "Abs":   sp.Abs,
+        "abs":   sp.Abs,
+    }
+    if x_sym is not None:
+        ld["x"] = x_sym
+    return ld
+
+
+def _to_latex(expr) -> str:
+    r"""Convierte una expresión SymPy a LaTeX diferenciando claramente entre:
+    - ln(...)  -> logaritmo natural (\ln)
+    - log(...) -> logaritmo en base 10 (\log_{10}) o en la base especificada (\log_{b})
+    """
+    if expr is None:
+        return ""
+    try:
+        tex = sp.latex(expr, ln_notation=True)
+
+        def _repl_log(m):
+            prefix = m.group(1) or ""
+            arg = m.group(2) or m.group(3)
+            base = m.group(4) or m.group(5)
+            if base == "10":
+                return rf"{prefix}\log_{{10}}\left({arg}\right)"
+            return rf"{prefix}\log_{{{base}}}\left({arg}\right)"
+
+        tex = re.sub(
+            r"\\frac\{(.*?)\\ln(?:\{\\left\((.*?)\\right\)\}|\{(.*?)\})\}\{\\ln(?:\{\\left\(([0-9]+)\s*\\right\)\}|\{([0-9]+)\s*\})\}",
+            _repl_log,
+            tex,
+        )
+        return tex
+    except Exception:
+        return sp.latex(expr) if hasattr(expr, "free_symbols") else str(expr)
+
+
 def _parse(func_str: str):
     """Devuelve (callable, latex_str, expr, x_sym) o lanza excepción."""
     x = sp.Symbol("x")
-    ld = {
-        "x":    x,      "e":    sp.E,    "E":    sp.E,
-        "pi":   sp.pi,  "ln":   sp.log,  "log":  sp.log,
-        "exp":  sp.exp, "sin":  sp.sin,  "cos":  sp.cos,
-        "tan":  sp.tan, "sqrt": sp.sqrt, "Abs":  sp.Abs, "abs": sp.Abs,
-    }
+    ld = _local_dict(x)
     expr = sp.sympify(func_str.replace("^", "**"), locals=ld)
     f    = sp.lambdify(x, expr, modules=["numpy"])
-    return f, sp.latex(expr), expr, x
+    return f, _to_latex(expr), expr, x
 
 
 def _classify_indeterminate(expr, x_sym, x_val):
@@ -167,22 +223,15 @@ class _SafeFunc:
 
 
 def _parse_val(s: str) -> float:
-    ld = {
-        "e": sp.E, "E": sp.E, "pi": sp.pi,
-        "ln": sp.log, "log": sp.log, "exp": sp.exp,
-        "sin": sp.sin, "cos": sp.cos, "tan": sp.tan, "sqrt": sp.sqrt,
-    }
+    ld = _local_dict()
     return float(sp.sympify(s.strip().replace("^", "**"), locals=ld))
 
 
 def _val_latex(s: str) -> str:
-    ld = {
-        "e": sp.E, "E": sp.E, "pi": sp.pi,
-        "ln": sp.log, "log": sp.log, "exp": sp.exp,
-        "sin": sp.sin, "cos": sp.cos, "tan": sp.tan, "sqrt": sp.sqrt,
-    }
+    ld = _local_dict()
     try:
-        return sp.latex(sp.sympify(s.strip().replace("^", "**"), locals=ld))
+        expr = sp.sympify(s.strip().replace("^", "**"), locals=ld)
+        return _to_latex(expr)
     except Exception:
         return s.strip()
 
@@ -697,7 +746,7 @@ def _show_truncation_error(method, expr, x_sym, a, b, n, h, xi, xi_str, d, a_str
     # — Derivada simbólica
     try:
         deriv_expr   = sp.diff(expr, x_sym, cfg["order"])
-        deriv_latex  = sp.latex(deriv_expr)
+        deriv_latex  = _to_latex(deriv_expr)
     except Exception as exc:
         st.warning(f"No se pudo calcular la derivada simbólica: {exc}")
         return None
@@ -793,14 +842,14 @@ def _show_real_error(expr, x_sym, a, b, result, d, a_str, b_str, exact_override=
     if exact_sym is not None:
         try:
             st.latex(
-                rf"\int_{{{al}}}^{{{bl}}} \left({sp.latex(expr)}\right) dx"
-                rf"= {sp.latex(exact_sym)} \approx {_fmt(exact_val, d)}"
+                rf"\int_{{{al}}}^{{{bl}}} \left({_to_latex(expr)}\right) dx"
+                rf"= {_to_latex(exact_sym)} \approx {_fmt(exact_val, d)}"
             )
         except Exception:
             st.latex(rf"\text{{Valor exacto}} \approx {_fmt(exact_val, d)}")
     else:
         st.latex(
-            rf"\int_{{{al}}}^{{{bl}}} \left({sp.latex(expr)}\right) dx"
+            rf"\int_{{{al}}}^{{{bl}}} \left({_to_latex(expr)}\right) dx"
             rf"= {_fmt(exact_val, d)} \quad \text{{(valor ingresado manualmente)}}"
         )
 
@@ -1349,7 +1398,8 @@ resuelto**.
     # ── f(x) ─────────────────────────────────────────────────────────────────
     func_str = st.text_input(
         "f(x)", value="x**2",
-        placeholder="Ej: sin(x),  exp(-x),  x**3 - 2*x + 1",
+        placeholder="Ej: sin(x),  exp(-x),  ln(x),  log(x),  x**3 - 2*x + 1",
+        help="ln(x) = logaritmo natural (base e) · log(x) = logaritmo decimal (base 10) · log(x, b) = base b",
     )
 
     f = latex_f = None
